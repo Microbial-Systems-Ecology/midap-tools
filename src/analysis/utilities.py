@@ -38,42 +38,34 @@ def load_segmentations_h5(path, group, binary = True):
         
     return data
 
-def filter_tracks(df : pd.DataFrame, column = "trackID", min_occurences = 2) -> pd.DataFrame:
-    """
-    Filters a track output file (loaded as pd.DataFrame) for low occurence 
-    Args:
-        df (pd.DataFrame): a track output dataframe
-        column (str, optional): the column to filter. Defaults to "TrackID".
-        min_occurences (int, optional): the number of minimal occurences of the entitiy in column to be retained. Defaults to 2.
-
-    Returns:
-        pd.DataFrame: filtered track output file
-    """
-    df = df.copy()
-    counts = df[column].value_counts()
-    valid_ids = counts[counts >= min_occurences].index
-    return df[df[column].isin(valid_ids)].reset_index(drop=True)
     
-def calculate_growth_rate(df: pd.DataFrame, id_column = "trackID", value_column = "major_axis_length", integration_window = 5) -> pd.DataFrame:
+def calculate_growth_rate(df: pd.DataFrame, 
+                          integration_window , 
+                          id_column, 
+                          value_column, 
+                          frame_column = "frame", 
+                          growth_rate_column = "growth_rate") -> pd.DataFrame:
     """
     from a track output file, determines the growth rate of entities in value_column based on value of value_column over a integration window
 
     Args:
         df (pd.DataFrame): track output dataframe
-        id_column (str, optional): which column will be used to determine what the entities are?. Defaults to "trackID".
-        value_column (str, optional): which value will be used to determine the size of the cells. Defaults to "major_axis_length".
+        id_column (str, optional): which column will be used to determine what the entities are? (i.e "trackID" for standard midap output).
+        value_column (str, optional): which value will be used to determine the size of the cells. (i.e "area" or "major_axis_length" in standard midap output).
+        frame_column (str, optional): which column is encoding frames? Defaults to "frame"
+        growth_rate_column (str, optional): how should the added column be named? Defaults to "growth_rate"
         integration_window (int, optional): over how many frames should the data be integrated. Defaults to 5.
 
     Returns:
         pd.DataFrame: a track output dataframe with the growth rate column added at each frame
     """
     df = df.copy()
-    df['growth_rate'] = 0.0
+    df[growth_rate_column] = 0.0
 
     grouped = df.groupby(id_column)
 
     for track_id, group in grouped:
-        group = group.sort_values('frame')
+        group = group.sort_values(frame_column)
         values = group[value_column].to_numpy()
         growth_rates = np.zeros(len(values))
 
@@ -84,7 +76,7 @@ def calculate_growth_rate(df: pd.DataFrame, id_column = "trackID", value_column 
             else:
                 growth_rates[i] = 0.0  # Cannot compute growth at the end
 
-        df.loc[group.index, 'growth_rate'] = growth_rates
+        df.loc[group.index, growth_rate_column] = growth_rates
 
     return df
     
@@ -153,8 +145,8 @@ def plot_growth_rate(
 
 def plot_growth_rate_with_ribbon(
     df,
-    frame_column="frame",
     growth_column="growth_rate",
+    frame_column="frame",
     group_name=None,
     title = None,
     rec=False

@@ -7,17 +7,16 @@ import inspect
 from IPython.display import display, JSON
 from typing import Union, List
 from analysis.utilities import (load_tracking_data,
-                                      calculate_growth_rate,
                                       plot_growth_rate_with_ribbon,
                                       load_segmentations_h5,
                                       compute_densities_segmentation,
                                       plot_frame_cv2_jupyter_dict,
                                       sort_folder_names,
                                       )
-
+from analysis.growth_rate import calculate_growth_rate
 from plotting.histogram import plot_histogram, plot_value_count_histogram
 from mutate.fuse import fuse_track_output
-from mutate.filter import filter_tracks
+from mutate.filter import filter_by_column
 
 class FluidExperiment:
     def __init__(self, path, color_channels = None, positions = None, name = "experiment"):
@@ -98,7 +97,27 @@ class FluidExperiment:
         
         return info
     
-    def filter_tracks(self, column, min_occurences = 0, min_value = None, max_value = None, custom_function = None, **custom_kwargs):
+    def filter_data(self, 
+                      column: str, 
+                      min_occurences: int = 0, 
+                      min_value: float = None, 
+                      max_value: float = None, 
+                      custom_function = None, 
+                      **custom_kwargs):
+        """
+        Filters a dataframe base on a specified track. supports two modes (or combined mode)
+        if min_occurence > 0, filters out any row for which the unique value in the target column has less than min_occurence entries
+        if min_value or max_value not None, filters out any row for which this column has a value below or above these parameters
+        if multiple set, will first filter by min occurence, and then on top by min and max values
+        the function returns a tuple of a filtered data frame and a summary dictionary that informs about filtering statistics (method used and number of filtered rows / values)
+        Args:
+            df (pd.DataFrame): Input DataFrame.
+            column (str): Column to filter with. i.e "trackID" for min occurences or "area" for min / max values.
+            min_occurences (int, optional): Minimum number of occurrences to retain. Defaults to 0.
+            min_value (float, optional): Minimum value threshold. Defaults to None.
+            max_value (float, optional): Maximum value threshold. Defaults to None.
+            custom_function (function): can be set to a custom function
+        """
         if min_occurences >= 0:
             print(f"Filtering out {column} with less than {min_occurences} occurences")
         if min_value is not None or max_value is not None:
@@ -108,11 +127,20 @@ class FluidExperiment:
             for g in self.color_channels:
                 print(f"Filtering channel {g} at position {p}:")
                 if custom_function is not None:
-                    # Merge default arguments with user-supplied custom kwargs
-                    self.data[p][g], summary = custom_function(self.data[p][g], column=column, min_occurences=min_occurences, min_value = min_value, max_value = max_value, **custom_kwargs)
+                    # apply the custom function with optional additional kwargs
+                    self.data[p][g], summary = custom_function(self.data[p][g], 
+                                                               column=column, 
+                                                               min_occurences=min_occurences, 
+                                                               min_value = min_value, 
+                                                               max_value = max_value, 
+                                                               **custom_kwargs)
                 else:
-                    self.data[p][g], summary = filter_tracks(self.data[p][g], column, min_occurences, min_value, max_value)
-                        
+                    #Default function used by midap-tools
+                    self.data[p][g], summary = filter_by_column(self.data[p][g], 
+                                                                column, 
+                                                                min_occurences,
+                                                                min_value, 
+                                                                max_value)
                 self.filter_history[p][g].append(summary)
                 
         
@@ -144,7 +172,11 @@ class FluidExperiment:
                 plot_histogram(v,columns, title = f"histograms for position data {k}")
 
 
-    def print_life_cycle_histograms(self, columns, positions = None, color_channels = None, group_by = None):
+    def print_life_cycle_histograms(self, 
+                                    columns, 
+                                    positions = None, 
+                                    color_channels = None, 
+                                    group_by = None):
         """
         Plots a QC historgram for selected samples
 
@@ -162,33 +194,95 @@ class FluidExperiment:
             color_channels = self.color_channels
         
         if group_by is not None:
-            pdat = self.get_aggregate_data(group_by, color_channels)
+            pdat = self.get_aggregate_data(group_by, 
+                                           color_channels)
             for k, v in pdat.items():
-                plot_value_count_histogram(v,columns, title = f"life cycle histogram for aggregated data {k}")
+                plot_value_count_histogram(v,
+                                           columns, 
+                                           title = f"life cycle histogram for aggregated data {k}")
             return
         else:
             pdat = self.get_data(positions, color_channels)
             for k, v in pdat.items():
-                plot_value_count_histogram(v,columns, title = f"life cycle histogram for position data {k}")
+                plot_value_count_histogram(v,
+                                           columns, 
+                                           title = f"life cycle histogram for position data {k}")
 
                 
-    def calculate_growth_rate(self, id_column = "trackID", value_column = "major_axis_length", integration_window = 5, custom_method = None):
+    def calculate_growth_rate(self, 
+                              integration_window: int, 
+                              id_column: str, 
+                              value_column: str, 
+                              frame_column: str = "frame",
+                              growth_rate_column: str = "growth_rate", 
+                              custom_method = None, 
+                              **custom_kwargs):
+        """
+        Determines the growth rate and R-squared of value_column over a specified integration window in entire experiment.
+        Args:
+            df (pd.DataFrame): track output dataframe
+            integration_window (int): number of frames over which to calculate growth and R-squared
+            id_column (str): entity identifier column (e.g., "trackID")
+            value_column (str): column representing the metric to track (e.g., "area")
+            frame_column (str): column representing frame index. Defaults to "frame"
+            growth_rate_column (str): name for the new growth rate column. Defaults to "growth_rate"
+            r_squared_column (str): name for the new R-squared column. Defaults to "growth_rsquared"
+            custom_method (function): custom method to be used for calculation. defaults to = None
+            **custom_kwargs : additional arguments the custom function may take
+        """
         print(f"Calculate growth rate for {id_column} measured with {value_column} over an integration window of {integration_window}")
         for p in self.positions:
             for c in self.color_channels:
-                self.data[p][c] = calculate_growth_rate(self.data[p][c], id_column, value_column, integration_window)
+                if custom_method is not None:
+                    # apply the custom function with optional additional kwargs
+                    self.data[p][c] = custom_method(self.data[p][c], 
+                                                            integration_window, 
+                                                            id_column, 
+                                                            value_column,
+                                                            frame_column,
+                                                            growth_rate_column,
+                                                            **custom_kwargs)
+                else:    
+                    # Default midap-tools method
+                    self.data[p][c] = calculate_growth_rate(self.data[p][c], 
+                                                            integration_window, 
+                                                            id_column, 
+                                                            value_column,
+                                                            frame_column,
+                                                            growth_rate_column)
                 
-    def plot_rates(self, rate_column="growth_rate", position = None, color_channel = None, title = None):
+    def plot_rates(self, 
+                   rate_column="growth_rate", 
+                   frame_column = "frame",
+                   positions = None, 
+                   color_channels = None, 
+                   title = None, 
+                   group_by = None):
+        if positions is not None and group_by is not None:
+            print("can not select groups and positions, ignoring positions selection for plot")    
+        if positions is None:
+            positions = self.positions
+        if color_channels is None:
+            color_channels = self.color_channels
         if title is None:
-            title = "Mean Rate per Frame"
-        if position is not None:
-            if color_channel is not None:
-                plot_growth_rate_with_ribbon(self.data[position][color_channel], growth_column = rate_column)
-            else:
-                plot_growth_rate_with_ribbon(self.data[position], growth_column = rate_column)
+            title = "Mean Growth Rate per Frame"
+            
+        if group_by is not None:
+            pdat = self.get_aggregate_data(group_by, color_channels)
+            for k, v in pdat.items():
+                plot_growth_rate_with_ribbon(v, 
+                                             rate_column,
+                                             frame_column, 
+                                             title = f"{title} for aggregated data {k}")
+            return
         else:
-            for p in self.positions:
-                plot_growth_rate_with_ribbon(self.data[p], growth_column = rate_column, title = f"{p}: {title}")
+            pdat = self.get_data(positions, color_channels)
+            for k, v in pdat.items():
+                plot_growth_rate_with_ribbon(v, 
+                                             rate_column, 
+                                             frame_column,
+                                             title = f"{title} for position data {k}")
+
                 
     def max_value(self, column, position, group):
         return np.max(self.data[position][group][column])

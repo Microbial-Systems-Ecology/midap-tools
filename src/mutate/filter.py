@@ -1,7 +1,7 @@
 import pandas as pd
 from typing import Union, Tuple
 
-def filter_tracks(
+def filter_by_column(
     df: pd.DataFrame,
     column: str,
     min_occurences: int = 0,
@@ -15,15 +15,17 @@ def filter_tracks(
 
     Args:
         df (pd.DataFrame): Input DataFrame.
-        column (str, optional): Column to filter. Defaults to "trackID".
+        column (str): Column to filter with. i.e "trackID" for min occurences or "area" for min / max values.
         min_occurences (int, optional): Minimum number of occurrences to retain. Defaults to 0.
         min_value (float, optional): Minimum value threshold. Defaults to None.
         max_value (float, optional): Maximum value threshold. Defaults to None.
-        silent (bool, optional): If False, prints summary statistics. Defaults to False.
 
     Returns:
         Tuple[pd.DataFrame, dict]: Filtered DataFrame and summary dictionary.
     """
+    if df.empty:
+        return df, {}
+    
     df = df.copy()
     total_rows_before = len(df)
 
@@ -76,7 +78,7 @@ def filter_tracks_custom(
     max_value: Union[float, None] = None
 ) -> Tuple[pd.DataFrame, dict]:
     """
-    Custom function that filters every nth value (i.e frame)
+    Custom function that filters every nth value (i.e frame). example function that shows how a user modified function may look like
     """
     df = df.copy()
     total_rows_before = len(df) 

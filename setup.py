@@ -10,7 +10,8 @@ def get_requirements():
         "matplotlib",
         "scipy",
         "statsmodels",
-        "pytest"
+        "pytest",
+        "scikit-learn"
     ]
 
 setup(
