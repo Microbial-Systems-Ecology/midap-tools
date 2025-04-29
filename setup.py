@@ -11,7 +11,8 @@ def get_requirements():
         "scipy",
         "statsmodels",
         "pytest",
-        "scikit-learn"
+        "scikit-learn",
+        "pytables"
     ]
 
 setup(

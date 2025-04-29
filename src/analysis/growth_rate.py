@@ -9,7 +9,7 @@ def calculate_growth_rate(df: pd.DataFrame,
                           frame_column: str = "frame", 
                           growth_rate_column: str = "growth_rate") -> pd.DataFrame:
     """
-    Determines the growth rate and R-squared of value_column over a specified integration window.
+    Determines the growth rate of value_column over a specified integration window.
 
     Args:
         df (pd.DataFrame): track output dataframe
@@ -55,7 +55,7 @@ def calculate_growth_rate_r2(df: pd.DataFrame,
                           growth_rate_column: str = "growth_rate",
                           r_squared_column: str = "growth_rsquared") -> pd.DataFrame:
     """
-    Determines the growth rate and R-squared of value_column over a specified integration window.
+    Determines the growth rate and R-squared of value_column over a specified integration window. Warning, this function is considerably slower due to r2 calculations.
 
     Args:
         df (pd.DataFrame): track output dataframe

@@ -1,22 +1,23 @@
-
 import os
 import copy
 import pandas as pd
 import numpy as np
+import h5py
 import inspect
 from IPython.display import display, JSON
 from typing import Union, List
-from analysis.utilities import (load_tracking_data,
-                                      plot_growth_rate_with_ribbon,
-                                      load_segmentations_h5,
-                                      compute_densities_segmentation,
+from analysis.utilities import (
                                       plot_frame_cv2_jupyter_dict,
                                       sort_folder_names,
                                       )
 from analysis.growth_rate import calculate_growth_rate
+from analysis.local_neighborhood import compute_neighborhood_segmentation
 from plotting.histogram import plot_histogram, plot_value_count_histogram
+from plotting.rate_plots import plot_growth_rate_with_ribbon
+from plotting.qc_plots import plot_qc_xy_correlation
 from mutate.fuse import fuse_track_output
 from mutate.filter import filter_by_column
+from mutate.load import load_tracking_data, load_segmentations_h5
 
 class FluidExperiment:
     def __init__(self, path, color_channels = None, positions = None, name = "experiment"):
@@ -29,16 +30,12 @@ class FluidExperiment:
             self.positions = self._save_select(positions)
         
         if color_channels is None:
-            self.color_channels =[os.path.basename(f) for f in os.scandir(os.join(path,self.positions[0])) if f.is_dir()]
+            self.color_channels =[os.path.basename(f) for f in os.scandir(os.path.join(path,self.positions[0])) if f.is_dir()]
         else:
             self.color_channels = self._save_select(color_channels)
             
         self.data = {}
         self.filter_history = {}
-        self.n_frames = None
-        self.unequal_lengths = False
-        self.headers = None
-        self.unequal_header = False
         self.metadata = None
         self.name = name
         for p in self.positions:
@@ -48,19 +45,9 @@ class FluidExperiment:
                 print(f"Loading sample at position {p} for group {g}")
                 self.data[p][g] = load_tracking_data(os.path.join(path,p),g)
                 self.filter_history[p][g] = []
-                n_sample = np.max(self.data[p][g]['frame'])
-                header = list(self.data[p][g].columns.values)
-                if self.n_frames is not None:
-                    if n_sample != self.n_frames:
-                        Warning(f"unequal number of frames for some files. Was {self.n_frames}, but new sample at position {p} and channel {g} has length of {n_sample}")
-                        self.unequal_lengths = True
-                if self.headers is not None:
-                    if header != self.headers:
-                        Warning(f"unequal header for some files. Was {', '.join(map(str,self.headers))}, but new sample at position {p} and channel {g} has header of {', '.join(map(str,header))}")
-                        self.unequal_header = True
-                        
-                self.n_frames = n_sample
-                self.headers = header
+        
+        self._update_information()
+
                 
         if not self.unequal_lengths:
             print(f"Successfully loaded data with consistent number of frames: {self.n_frames}")
@@ -70,6 +57,7 @@ class FluidExperiment:
         """Create a copy of an existing FluidExperiment without reloading from disk."""
         new_instance = cls.__new__(cls)  # Bypass __init__
         new_instance.path = other.path
+        new_instance.name = other.name
         new_instance.positions = copy.deepcopy(other.positions)
         new_instance.color_channels = copy.deepcopy(other.color_channels)
         new_instance.data = copy.deepcopy(other.data)
@@ -77,7 +65,79 @@ class FluidExperiment:
         new_instance.unequal_lengths = other.unequal_lengths
         new_instance.headers = copy.deepcopy(other.headers)
         new_instance.unequal_header = other.unequal_header
+        new_instance.filter_history = copy.deepcopy(other.filter_history)
+        if other.metadata is not None:
+            new_instance.metadata = other.metadata.copy()
+        else:
+            new_instance.metadata = None
         return new_instance
+
+    @classmethod
+    def load(cls, file_path: str):
+        """
+        Load a FluidExperiment object from a single HDF5 file using h5py.
+
+        Args:
+            file_path (str): Path to the HDF5 file where the experiment is saved.
+
+        Returns:
+            FluidExperiment: An instance of the FluidExperiment class.
+        """
+        with h5py.File(file_path, 'r') as h5file:
+            # Load experiment metadata
+            experiment_info = h5file['experiment_info']
+            instance = cls.__new__(cls)  # Bypass __init__
+            instance.path = experiment_info.attrs['path']
+            instance.name = experiment_info.attrs['name']
+            instance.positions = list(experiment_info.attrs['positions'])
+            instance.color_channels = list(experiment_info.attrs['color_channels'])
+            instance.n_frames = experiment_info.attrs['n_frames']
+            instance.unequal_lengths = experiment_info.attrs['unequal_lengths']
+            instance.headers = list(experiment_info.attrs['headers'])
+            instance.unequal_header = experiment_info.attrs['unequal_header']
+
+            # Load metadata
+            if 'metadata' in h5file:
+                metadata_group = h5file['metadata']
+                metadata_dict = {
+                    col: [val.decode('utf-8') if isinstance(val, bytes) else val for val in metadata_group[col][...]]
+                    for col in metadata_group
+                }
+                instance.metadata = pd.DataFrame(metadata_dict)
+                instance.metadata.index = instance.metadata["position"]
+            else:
+                instance.metadata = None
+
+            # Load data
+            instance.data = {}
+            data_group = h5file['data']
+            for p in instance.positions:
+                instance.data[p] = {}
+                position_group = data_group[p]
+                for c in instance.color_channels:
+                    channel_group = position_group[c]
+                    df_dict = {
+                        col: [val.decode('utf-8') if isinstance(val, bytes) else val for val in channel_group[col][...]]
+                        if channel_group[col].dtype.kind == 'S' else channel_group[col][...]
+                        for col in channel_group
+                    }
+                    instance.data[p][c] = pd.DataFrame(df_dict)
+
+            # Load filter history
+            instance.filter_history = {p: {c: [] for c in instance.color_channels} for p in instance.positions}
+            if 'filter_history' in h5file:
+                filter_history_group = h5file['filter_history']
+                for p in filter_history_group:
+                    position_group = filter_history_group[p]
+                    for c in position_group:
+                        channel_group = position_group[c]
+                        for i in channel_group:
+                            history_group = channel_group[i]
+                            history_entry = {key: history_group.attrs[key] for key in history_group.attrs}
+                            instance.filter_history[p][c].append(history_entry)
+
+        print(f"Successfully loaded experiment with data from {len(instance.positions)} positions and {len(instance.color_channels)} color channels")
+        return instance
             
     def __str__(self):
         info = (f"FluidExperiment with path: {self.path}\n" +
@@ -142,9 +202,14 @@ class FluidExperiment:
                                                                 min_value, 
                                                                 max_value)
                 self.filter_history[p][g].append(summary)
+        self._update_information()
                 
         
-    def print_QC_histograms(self, columns, positions = None, color_channels = None, group_by = None):
+    def plot_qc_histograms(self, 
+                           columns: Union[str, List[str]], 
+                           positions: Union[str, List[str]] = None, 
+                           color_channels: Union[str, List[str]] = None, 
+                           group_by: str = None):
         """
         Plots a QC historgram for selected samples
 
@@ -170,13 +235,60 @@ class FluidExperiment:
             pdat = self.get_data(positions, color_channels)
             for k, v in pdat.items():
                 plot_histogram(v,columns, title = f"histograms for position data {k}")
+                
+                
+    def plot_qc(self, 
+                value_column: str, 
+                n_samples: int = 8,
+                id_column: str = "trackID", 
+                frame_column: str = "frame",
+                positions: Union[str, List[str]] = None, 
+                color_channels: Union[str, List[str]] = None, 
+                group_by: str = None):
+        """
+        Plots QC (Quality Control) scatter plots for selected samples.
+
+        Args:
+            value_column (str): The column representing the Y-axis values (e.g., "major_axis_length").
+            n_samples (int, optional): The number of random examples to plot. Defaults to 8.
+            id_column (str, optional): The column used to group the data. Defaults to "trackID".
+            frame_column (str, optional): The column representing the X-axis values. Defaults to "frame".
+            positions (str or list of str, optional): List of positions to include in the plot. Defaults to None, 
+                                            which includes all positions.
+            color_channels (str or list of str, optional): List of color channels to include in the plot. Defaults to None, 
+                                                    which includes all color channels.
+            group_by (str, optional): Metadata column name to group data by for aggregation. If specified, 
+                                    positions are ignored.
+        """
+        if positions is not None and group_by is not None:
+            print("can not select groups and positions, ignoring positions selection for plot")    
+        if positions is None:
+            positions = self.positions
+        if color_channels is None:
+            color_channels = self.color_channels
+            
+        if group_by is not None:
+            pdat = self.get_aggregate_data(group_by, 
+                                           color_channels)
+        else:
+            pdat = self.get_data(positions, color_channels)
+            
+        for k, v in pdat.items():
+            for k2, v2 in v.items():
+                plot_qc_xy_correlation(v2,
+                                    id_column = id_column,
+                                    value_column = value_column,
+                                    frame_column = frame_column,
+                                    n = n_samples,
+                                    title = f"{k}, {k2}, {id_column}")
 
 
-    def print_life_cycle_histograms(self, 
-                                    columns, 
-                                    positions = None, 
-                                    color_channels = None, 
-                                    group_by = None):
+
+    def plot_life_cycle_histograms(self, 
+                                    columns: Union[str, List[str]], 
+                                    positions: Union[str, List[str]] = None, 
+                                    color_channels: Union[str, List[str]] = None, 
+                                    group_by: str = None):
         """
         Plots a QC historgram for selected samples
 
@@ -215,7 +327,7 @@ class FluidExperiment:
                               value_column: str, 
                               frame_column: str = "frame",
                               growth_rate_column: str = "growth_rate", 
-                              custom_method = None, 
+                              custom_method: function = None, 
                               **custom_kwargs):
         """
         Determines the growth rate and R-squared of value_column over a specified integration window in entire experiment.
@@ -250,6 +362,7 @@ class FluidExperiment:
                                                             value_column,
                                                             frame_column,
                                                             growth_rate_column)
+        self._update_information()
                 
     def plot_rates(self, 
                    rate_column="growth_rate", 
@@ -258,6 +371,22 @@ class FluidExperiment:
                    color_channels = None, 
                    title = None, 
                    group_by = None):
+        """
+        Plots the growth rate over time for the experiment.
+        This function generates line plots with ribbons representing the growth rate over time. 
+        It supports plotting for individual positions and color channels or aggregated data based on metadata grouping.
+
+        Args:
+            rate_column (str): The column name representing the growth rate to be plotted. Defaults to "growth_rate".
+            frame_column (str): The column name representing the frame index. Defaults to "frame".
+            positions (list of str, optional): List of positions to include in the plot. Defaults to None, which includes all positions.
+            color_channels (list of str, optional): List of color channels to include in the plot. Defaults to None, which includes all color channels.
+            title (str, optional): Title of the plot. Defaults to "Mean Growth Rate per Frame".
+            group_by (str, optional): Metadata column name to group data by for aggregation. If specified, positions are ignored.
+
+        Returns:
+            None: The function generates plots but does not return any value.
+        """
         if positions is not None and group_by is not None:
             print("can not select groups and positions, ignoring positions selection for plot")    
         if positions is None:
@@ -282,26 +411,21 @@ class FluidExperiment:
                                              rate_column, 
                                              frame_column,
                                              title = f"{title} for position data {k}")
-
-                
-    def max_value(self, column, position, group):
-        return np.max(self.data[position][group][column])
-          
-    def collapse_all_positions(self, new_name = "fused"):
-        print(f"Fuseing all exisiting positions into a single position with the name {new_name}")
-        self.fuse_positions(self.positions[0], self.positions[1:], silent= True)
-        self.data[new_name] = self.data[self.positions[0]]
-        self.data.pop(self.positions[0])
-        self.positions = [new_name]
         
     def create_metdata_template(self, path = None, overwrite = False):
             """
-            Export a list of strings to a CSV file with a single column named 'position'.
-    
-            Parameters:
-            - string_list: list of strings to write
-            - output_path: destination file path
-            - overwrite: if False, raises error if file exists; if True, overwrites file
+            Creates and exports a metadata template as a CSV file.
+            The template includes columns for position, group, experiment, and device_channel. 
+            It is useful for initializing metadata for the experiment.
+
+            Args:
+                path (str, optional): The file path to save the metadata template. Defaults to None, 
+                                    which saves the file in the experiment's path with a default name.
+                overwrite (bool, optional): If False, raises an error if the file already exists. 
+                                            If True, overwrites the file. Defaults to False.
+            Returns:
+                None: The function writes the metadata template to a CSV file.
+
             """
             if path is None:
                 path = os.path.join(self.path, self.name + "_metadata.csv")
@@ -337,6 +461,7 @@ class FluidExperiment:
             expected_columns = {'position', 'group', 'experiment', 'device_channel'}
             
             df = pd.read_csv(path)
+            df.index = df["position"]
             missing = expected_columns - set(df.columns)
             if missing:
                 raise ValueError(f"Missing required columns: {', '.join(missing)} in file {path}")
@@ -344,18 +469,83 @@ class FluidExperiment:
             missing_positions = set(self.positions) - set(df['position'])
             if missing_positions:
                 raise ValueError(f"Positions not found in metadata file: {', '.join(missing_positions)}")
-            self.metadata = df
+            self.metadata = df.loc[self.positions]
                     
         
-    def calculate_densities(self, distance_threshold = 50):
-        print(f"Calculating densities of all channels in a radius of {distance_threshold} px")
+    def calculate_local_neighborhood(self, 
+                                     distance_threshold: int, 
+                                     neighborhood_prefix = "density_", 
+                                     custom_function = None, **custom_kwargs):
+        """
+        Calculates the local neighborhood density for all positions and color channels.
+        This function computes the density of overlap between a circular region around each target point 
+        and a set of binary masks. The results are added as new columns to the data.
+
+        Args:
+            distance_threshold (int): The radius of the circular region (in pixels) used to compute the neighborhood density.
+            neighborhood_prefix (str, optional): A prefix for the column names added to the data. Defaults to "density_".
+            custom_function (function, optional): A custom function for neighborhood calculation. Defaults to None, 
+                                                which uses the default method.
+            **custom_kwargs: Additional arguments for the custom function.
+
+        Returns:
+            None: The function updates the data with neighborhood density columns.
+        """
+        print(f"Calculating neighborhoods of all channels in a radius of {distance_threshold} px")
         for p in self.positions:
-            print(f"Calculate density for position {p}")
+            print(f"Calculate neighborhoods for position {p}")
             mask = {}
             for c in self.color_channels:
                 mask[c] = load_segmentations_h5(os.path.join(self.path, p),c)
-            self.data[p] = compute_densities_segmentation(self.data[p],mask, distance_threshold)
+            if custom_function is None:
+                #default method for neighborhood calculation from segmentations
+                self.data[p] = compute_neighborhood_segmentation(self.data[p],
+                                                                 mask, 
+                                                                 neighborhood_prefix,
+                                                                 distance_threshold)
+            else:
+                #in case the user specified a custom function
+                self.data[p] = custom_function(self.data[p],
+                                               mask, 
+                                               distance_threshold, 
+                                               neighborhood_prefix,
+                                               **custom_kwargs)
+        self._update_information()
             
+            
+    def _update_information(self):
+        """
+        checks length of all files (n frames) and headers for consistency. updates print information
+        """
+        self.n_frames = None
+        self.unequal_lengths = False
+        self.headers = None
+        self.unequal_header = False
+
+        for p in self.positions:
+            for g in self.color_channels:
+                n_sample = np.max(self.data[p][g]['frame'])
+                header = list(self.data[p][g].columns.values)
+
+                if self.n_frames is not None:
+                    if n_sample != self.n_frames:
+                        print(
+                            f"Warning: Unequal number of frames detected. "
+                            f"Expected {self.n_frames}, but position {p}, channel {g} has {n_sample} frames."
+                        )
+                        self.unequal_lengths = True
+
+                if self.headers is not None:
+                    if header != self.headers:
+                        print(
+                            f"Warning: Unequal headers detected. "
+                            f"Expected {', '.join(map(str, self.headers))}, but position {p}, channel {g} has "
+                            f"header {', '.join(map(str, header))}."
+                        )
+                        self.unequal_header = True
+                self.n_frames = n_sample
+                self.headers = header
+    
     def get_data(self, 
         positions: Union[str, List[str]] = None, 
         color_channels: Union[str, List[str]] = None
@@ -386,6 +576,11 @@ class FluidExperiment:
         }
         
     def report_filter_history(self):
+        """
+        Prints the filter history for all positions and color channels.
+        The filter history includes details about the filters applied to each color channel at each position, 
+        such as the number of filters and their parameters.
+        """
         for p in self.positions:
             for c in self.color_channels:
                 print(f"Filtering applied to color channel {c} at position {p}:")
@@ -399,7 +594,9 @@ class FluidExperiment:
 
                 
     
-    def get_aggregate_data(self, column, color_channels = None):
+    def get_aggregate_data(self, 
+                           column, 
+                           color_channels = None):
         if self.metadata is None:
             raise AttributeError("Experiment does not have any metadata, use load_metadata_template first")
         if column not in self.metadata.columns:
@@ -418,8 +615,7 @@ class FluidExperiment:
             agg_dat[k] = {}
             for c in color_channels:
                 dat = [self.data[i][c] for i in v]
-                agg_dat[k][c] = fuse_track_output(dat)
-            
+                agg_dat[k][c] = fuse_track_output(dat)     
         return agg_dat
     
     def _save_select(self, selected):
@@ -427,7 +623,11 @@ class FluidExperiment:
             return [selected]
         return selected
     
-    def print_selected_frame(self, frame, positions = None, color_channels = None, color = None):
+    def print_selected_frame(self, 
+                             frame, 
+                             positions = None, 
+                             color_channels = None, 
+                             color = None):
         if color_channels is None:
             color_channels = self.color_channels   
         color_channels = self._save_select(color_channels)
@@ -442,14 +642,127 @@ class FluidExperiment:
                 array[c] = load_segmentations_h5(os.path.join(self.path, p),c)
             plot_frame_cv2_jupyter_dict(array,frame, color, title = f"{p}: Overlay of Channels")
         
-    def drop_positions(self, positions):
-        positions = self._save_select(positions)
-            
+    def drop_positions(self, positions: Union[str,List[str]]):
+        """
+        Removes specified positions from the experiment.
+        This function deletes the data, filter history, and metadata associated with the specified positions.
+        Args:
+            positions (str or list of str): The positions to remove from the experiment.
+        Returns:
+            None: The function updates the experiment by removing the specified positions.
+        """
+        positions = self._save_select(positions)  
         self.positions = [p for p in self.positions if p not in positions]
         for p in positions:
             print(f"Dropping position {p} from experiment")
             self.data.pop(p)
-
+            self.filter_history.pop(p)
+            if self.metadata is not None:
+                self.metadata.drop(index = p, inplace= True)
+        self._update_information()
         
-                
+    def add_transform_data(self, 
+                           column, 
+                           postfix = "_log",
+                           type = "log", 
+                           custom_function = None,
+                           **custom_kwargs):
+        """
+        Adds a transformed version of a specified column to the data.
+        The transformation can be logarithmic or any other type specified by the user.
+
+        Args:
+            column (str): The column to transform.
+            postfix (str, optional): The postfix to append to the new column name. Defaults to "_log".
+            type (str, optional): The type of transformation to apply. Defaults to "log". valid alternatives are "square" and "inverse"
+            custom_method (function): custom method to be used for calculation (applied to a pd.Series). defaults to = None. If custom function defined, will ignore type and apply this function instead
+            **custom_kwargs : additional arguments the custom function may take
+
+        Returns:
+            None: The function updates the data with the transformed column.
+        """
+        for p in self.positions:
+            for c in self.color_channels:
+                if custom_function is not None:
+                    self.data[p][c][column + postfix] = custom_function(self.data[p][c][column], **custom_kwargs)
+                match type:
+                    case "log":
+                        self.data[p][c][column + postfix] = np.log(self.data[p][c][column])
+                    case "square":
+                        self.data[p][c][column + postfix] = np.square(self.data[p][c][column])
+                    case "inverse":
+                        self.data[p][c][column + postfix] = np.reciprocal(self.data[p][c][column])
+        self._update_information()
             
+    def drop_color_channels(self, color_channels: Union[str,List[str]]):
+        """
+        Removes specified color channels from the experiment.
+        This function deletes the data and filter history associated with the specified color channels.
+
+        Args:
+            color_channels (str or list of str): The color channels to remove from the experiment.
+
+        Returns:
+            None: The function updates the experiment by removing the specified color channels.
+        """
+        color_channels = self._save_select(color_channels)
+        self.color_channels = [c for c in self.color_channels if c not in color_channels]
+        for p in self.positions:
+            for c in color_channels:
+                print(f"Dropping color_channel {c} from position {p} in experiment")
+                self.data[p].pop(c)
+                self.filter_history[p].pop(c)
+        self._update_information()
+
+    def save(self, file_path: str = None):
+        """
+        Save the FluidExperiment object to a single HDF5 file using h5py.
+
+        Args:
+            file_path (str, optional): Path to the HDF5 file where the experiment will be saved. defaults to the results folder and experiment name
+        """
+        if file_path is None:
+            file_path = os.path.join(self.path,self.name + ".h5")
+        
+        with h5py.File(file_path, 'w') as h5file:
+            # Save metadata
+            if self.metadata is not None:
+                metadata_group = h5file.create_group('metadata')
+                for col in self.metadata.columns:
+                    metadata_group.create_dataset(col, data=self.metadata[col].values)
+            
+            # Save data
+            data_group = h5file.create_group('data')
+            for p in self.positions:
+                position_group = data_group.create_group(p)
+                for c in self.color_channels:
+                    channel_group = position_group.create_group(c)
+                    df = self.data[p][c]
+                    for col in df.columns:
+                        channel_group.create_dataset(col, data=df[col].values)
+
+            # Save filter history
+            filter_history_group = h5file.create_group('filter_history')
+            for p in self.positions:
+                position_group = filter_history_group.create_group(p)
+                for c in self.color_channels:
+                    channel_group = position_group.create_group(c)
+                    for i, history in enumerate(self.filter_history[p][c]):
+                        history_group = channel_group.create_group(str(i))
+                        for key, value in history.items():
+                            history_group.attrs[key] = value
+
+            # Save experiment metadata
+            experiment_info_group = h5file.create_group('experiment_info')
+            experiment_info_group.attrs['path'] = self.path
+            experiment_info_group.attrs['name'] = self.name
+            experiment_info_group.attrs['positions'] = self.positions
+            experiment_info_group.attrs['color_channels'] = self.color_channels
+            experiment_info_group.attrs['n_frames'] = self.n_frames
+            experiment_info_group.attrs['unequal_lengths'] = self.unequal_lengths
+            experiment_info_group.attrs['headers'] = self.headers
+            experiment_info_group.attrs['unequal_header'] = self.unequal_header
+
+        print(f"Saved experiment at {file_path}")
+
+

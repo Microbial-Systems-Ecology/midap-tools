@@ -54,8 +54,8 @@ def filter_by_column(
     summary = {
         "column_filtered": column,
         "min_occurences": min_occurences,
-        "min_value": min_value,
-        "max_value": max_value,
+        "min_value": min_value if min_value is not None else '',
+        "max_value": max_value if max_value is not None else '',
         "unique_values_before": unique_before,
         "unique_values_after": unique_after,
         "rows_before": total_rows_before,
