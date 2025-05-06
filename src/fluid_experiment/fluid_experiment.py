@@ -18,6 +18,83 @@ from mutate.filter import filter_by_column
 from mutate.load import load_tracking_data, load_segmentations_h5
 
 class FluidExperiment:
+    """
+    A class to manage and analyze fluid experiment data organized by position and color channel.
+
+    The `FluidExperiment` class provides functionality to load, manipulate, analyze, and visualize 
+    experimental data. It supports operations such as filtering, fusing, calculating growth rates, 
+    and plotting results. The data is organized hierarchically by positions and color channels, 
+    with metadata support for grouping and aggregation.
+
+    Attributes:
+        path (str): The root directory path containing experimental data.
+        positions (list[str]): List of position names in the experiment.
+        color_channels (list[str]): List of color channel names in the experiment.
+        data (dict): Nested dictionary holding loaded tracking data indexed by position and channel.
+        filter_history (dict): Nested dictionary tracking filters applied to the data.
+        metadata (pd.DataFrame or None): Metadata associated with the experiment, if loaded.
+        name (str): Name of the experiment, used for identification and metadata purposes.
+        n_frames (int or None): Number of frames in the experiment, if consistent across all data.
+        unequal_lengths (bool): Indicates if the number of frames is inconsistent across positions/channels.
+        headers (list[str] or None): Column headers of the data, if consistent across all data.
+        unequal_header (bool): Indicates if the column headers are inconsistent across positions/channels.
+
+    Methods:
+        from_copy(other): Creates a copy of an existing `FluidExperiment` instance.
+        load(file_path): Loads a `FluidExperiment` object from an HDF5 file.
+        save(file_path): Saves the `FluidExperiment` object to an HDF5 file.
+        filter_data(column, ...): Filters data based on specified criteria.
+        drop_positions(positions): Removes specified positions from the experiment.
+        drop_color_channels(color_channels): Removes specified color channels from the experiment.
+        create_metdata_template(path, overwrite): Creates and exports a metadata template as a CSV file.
+        load_metadata_template(path): Loads metadata from a CSV file.
+        fuse(other): Fuses the current `FluidExperiment` with another `FluidExperiment`.
+        calculate_growth_rate(...): Calculates growth rates for the experiment data.
+        calculate_local_neighborhood(...): Calculates local neighborhood densities for the data.
+        calculate_transform_data(...): Adds transformed versions of specified columns to the data.
+        plot_qc_histograms(...): Plots QC histograms for selected samples.
+        plot_qc(...): Plots QC scatter plots for selected samples.
+        plot_life_cycle_histograms(...): Plots histograms for life cycle data.
+        plot_rates(...): Plots growth rates over time for the experiment.
+        plot_selected_frame(...): Plots a selected frame from the experiment data.
+        report_filter_history(): Prints the filter history for all positions and color channels.
+        get_data(positions, color_channels): Retrieves data for specified positions and color channels.
+        get_aggregate_data(column, color_channels): Aggregates data across groups defined by metadata.
+
+    Example:
+        ```python
+        # Initialize a FluidExperiment instance
+        exp = FluidExperiment(path="/path/to/data", color_channels=["CFP", "YFP"], name="Experiment1")
+
+        # Create and load metadata
+        exp.create_metdata_template()
+        exp.load_metadata_template()
+
+        # Filter data and calculate growth rates
+        exp.filter_data(column="trackID", min_occurences=5)
+        exp.calculate_local_neighborhood(distance_threshold=50)
+        exp.calculate_transform_data(columns=["area", "growth_rate"], method="log", postfix = "_log")
+        exp.calculate_growth_rate(integration_window=5, id_column="trackID", value_column="area_log")
+        
+        # Inspect the experiment data (overview report)
+        print(exp)
+
+        # Plot results
+        exp.plot_qc(value_column = "area_log")
+        exp.plot_rates(group_by="group")
+        exp.plot_qc_histograms(columns=["area", "growth_rate"])
+        
+        # Save the experiment data to an HDF5 file
+        exp.save(file_path="/path/to/results/experiment1_data.h5")
+        
+        # Drop a color channel
+        exp.drop_color_channels(color_channels="CFP")
+        
+        # Load 2nd experiment and fuse with with the first
+        exp2 = FluidExperiment(path="/path/to/data2", color_channels=["YFP"], name="Experiment2")
+        exp_fused = exp + exp2
+        ```
+    """
 
 # ==========================================================    
 # ==================== CLASS METHODS =======================
@@ -36,21 +113,12 @@ class FluidExperiment:
         Args:
             path (str): Path to the root directory containing subdirectories for each position. Each position
                 directory is expected to contain subdirectories corresponding to different color channels.
-            color_channels (Union[str, List[str]], optional): A specific color channel or list of channels to load.
+            color_channels (str or [str], optional): A specific color channel or list of channels to load.
                 If None, all color channel directories found under the first position will be used. Defaults to None.
-            positions (Union[str, List[str]], optional): A specific position or list of positions to load. If None, 
+            positions (str or [str], optional): A specific position or list of positions to load. If None, 
                 all subdirectories in `path` will be considered as positions. Defaults to None.
             name (str, optional): A name for the experiment. Used for identification or metadata purposes. 
                 Defaults to "experiment".
-        
-        Attributes:
-            path (str): The root directory path.
-            positions (List[str]): List of position names.
-            color_channels (List[str]): List of color channel names.
-            data (dict): Nested dictionary holding loaded tracking data indexed by position and channel.
-            filter_history (dict): Nested dictionary tracking filters applied to the data.
-            metadata (Any): Placeholder for experiment metadata (initially None, pd.DataFrame once loaded).
-            name (str): Name of the experiment.
         """
         self.path = path
         
@@ -112,7 +180,7 @@ class FluidExperiment:
             file_path (str): Path to the HDF5 file where the experiment is saved.
 
         Returns:
-            FluidExperiment: An instance of the FluidExperiment class.
+            instance (FluidExperiment): An instance of the FluidExperiment class.
         """
         with h5py.File(file_path, 'r') as h5file:
             # Load experiment metadata
@@ -197,7 +265,7 @@ class FluidExperiment:
             other (FluidExperiment): the other FluidExperiment to be added
 
         Returns:
-            FluidExperiment: a new fluid experiment with the data of both experiments
+            new_exp (FluidExperiment): a new fluid experiment object with the data of both experiments
         """
         new_exp = FluidExperiment.from_copy(self)
         new_exp.fuse(other)
@@ -211,7 +279,7 @@ class FluidExperiment:
             position (str): The position key to access.
 
         Returns:
-            dict: A dictionary of color channels and their corresponding data for the specified position.
+            (dict): A dictionary of color channels and their corresponding data for the specified position.
 
         Raises:
             KeyError: If the position does not exist in the experiment.
@@ -245,10 +313,10 @@ class FluidExperiment:
         """private method used to select positions or color channels savely (i.e if only one is selected, it returns a list with this single element)
 
         Args:
-            selected (Union[str, List[str]]): the selected positions or color channels
+            selected (str or [str]): the selected positions or color channels
 
         Returns:
-            [str]: a list of selected positions or color channels compatible with any other method of FluidExperiment
+            selected ([str]): a list of selected positions or color channels compatible with any other method of FluidExperiment
         """
         if isinstance(selected,str):
             return [selected]
@@ -294,7 +362,7 @@ class FluidExperiment:
         Args:
             target (dict): The target dictionary to be updated.
             source (dict): The source dictionary to be merged into the target.
-            renamed_positions (list): List of unique position names for the source dictionary.
+            renamed_positions ([str]): List of unique position names for the source dictionary.
 
         Returns:
             None: The target dictionary is updated in place.
@@ -310,10 +378,10 @@ class FluidExperiment:
         Generate unique position names to avoid conflicts with existing positions.
 
         Args:
-            positions (list): List of positions to be renamed.
+            positions ([str]): List of positions to be renamed.
 
         Returns:
-            list: List of unique position names.
+            unique_positions ([str]): List of unique position names.
         """
         existing_positions = set(self.positions)
         unique_positions = []
@@ -345,12 +413,14 @@ class FluidExperiment:
         if multiple set, will first filter by min occurence, and then on top by min and max values
         the function returns a tuple of a filtered data frame and a summary dictionary that informs about filtering statistics (method used and number of filtered rows / values)
         Args:
-            df (pd.DataFrame): Input DataFrame.
             column (str): Column to filter with. i.e "trackID" for min occurences or "area" for min / max values.
             min_occurences (int, optional): Minimum number of occurrences to retain. Defaults to 0.
             min_value (float, optional): Minimum value threshold. Defaults to None.
             max_value (float, optional): Maximum value threshold. Defaults to None.
             custom_function (function): can be set to a custom function
+            **custom_kwargs : additional arguments the custom function may take
+        Returns:
+            None: The function updates the data and filter history in place.
         """
         if min_occurences >= 0:
             print(f"Filtering out {column} with less than {min_occurences} occurences")
@@ -383,7 +453,7 @@ class FluidExperiment:
         Removes specified positions from the experiment.
         This function deletes the data, filter history, and metadata associated with the specified positions.
         Args:
-            positions (str or list of str): The positions to remove from the experiment.
+            positions (str or [str]): The positions to remove from the experiment.
         Returns:
             None: The function updates the experiment by removing the specified positions.
         """
@@ -403,7 +473,7 @@ class FluidExperiment:
         This function deletes the data and filter history associated with the specified color channels.
 
         Args:
-            color_channels (str or list of str): The color channels to remove from the experiment.
+            color_channels (str or [str]): The color channels to remove from the experiment.
 
         Returns:
             None: The function updates the experiment by removing the specified color channels.
@@ -648,10 +718,10 @@ class FluidExperiment:
         Plots a QC historgram for selected samples
 
         Args:
-            columns [str]: name of columns that should be shown
-            position str : Name of position to be plotted. Defaults to None = one plot for each position.
-            color_channel str : Name of channel to be shown. Defaults to None = all channels shown next to each other.
-            group_by  str: name of metadata column by which data should be aggregated prior to plotting
+            columns (str or [str]): name of columns that should be shown
+            position (str or [str], optional): Name of position to be plotted. Defaults to None = one plot for each position.
+            color_channel (str or [str], optional): Name of channel to be shown. Defaults to None = all channels shown next to each other.
+            group_by  (str): name of metadata column by which data should be aggregated prior to plotting
         """
         if positions is not None and group_by is not None:
             print("can not select groups and positions, ignoring positions selection for plot")    
@@ -682,13 +752,13 @@ class FluidExperiment:
         Plots QC (Quality Control) scatter plots for selected samples.
 
         Args:
-            value_column (str): The column representing the Y-axis values (e.g., "major_axis_length").
+            value_column (str): The column representing the Y-axis values (e.g., "major_axis_length" or "area").
             n_samples (int, optional): The number of random examples to plot. Defaults to 8.
             id_column (str, optional): The column used to group the data. Defaults to "trackID".
             frame_column (str, optional): The column representing the X-axis values. Defaults to "frame".
-            positions (str or list of str, optional): List of positions to include in the plot. Defaults to None, 
+            positions (str or [str], optional): List of positions to include in the plot. Defaults to None, 
                                             which includes all positions.
-            color_channels (str or list of str, optional): List of color channels to include in the plot. Defaults to None, 
+            color_channels (str or [str], optional): List of color channels to include in the plot. Defaults to None, 
                                                     which includes all color channels.
             group_by (str, optional): Metadata column name to group data by for aggregation. If specified, 
                                     positions are ignored.
@@ -724,10 +794,10 @@ class FluidExperiment:
         Plots a QC historgram for selected samples
 
         Args:
-            columns (Union[str, List[str]], optional): name of columns that should be shown
-            position (Union[str, List[str]], optional) : Name of position to be plotted. Defaults to None = one plot for each position.
-            color_channel (Union[str, List[str]], optional) : Name of channel to be shown. Defaults to None = all channels shown next to each other.
-            group_by  str: name of metadata column by which data should be aggregated prior to plotting
+            columns (str or [str]): name of columns that should be shown
+            position (str or [str], optional): Name of position to be plotted. Defaults to None = one plot for each position.
+            color_channel (str or [str], optional): Name of channel to be shown. Defaults to None = all channels shown next to each other.
+            group_by (str): name of metadata column by which data should be aggregated prior to plotting
         """
         if positions is not None and group_by is not None:
             print("can not select groups and positions, ignoring positions selection for plot")    
@@ -764,10 +834,10 @@ class FluidExperiment:
         It supports plotting for individual positions and color channels or aggregated data based on metadata grouping.
 
         Args:
-            rate_column (str): The column name representing the growth rate to be plotted. Defaults to "growth_rate".
-            frame_column (str): The column name representing the frame index. Defaults to "frame".
-            positions (list of str or str, optional): List of positions to include in the plot. Defaults to None, which includes all positions.
-            color_channels (list of str or str, optional): List of color channels to include in the plot. Defaults to None, which includes all color channels.
+            rate_column (str, optional): The column name representing the growth rate to be plotted. Defaults to "growth_rate".
+            frame_column (str, optional): The column name representing the frame index. Defaults to "frame".
+            positions (str or [str], optional): List of positions to include in the plot. Defaults to None, which includes all positions.
+            color_channels (str or [str], optional): List of color channels to include in the plot. Defaults to None, which includes all color channels.
             title (str, optional): Title of the plot. Defaults to "Mean Growth Rate per Frame".
             group_by (str, optional): Metadata column name to group data by for aggregation. If specified, positions are ignored.
 
@@ -811,11 +881,11 @@ class FluidExperiment:
 
         Args:
             frame (int): Index of the frame to plot.
-            positions (Union[str, List[str]], optional): A single position or list of positions to include in the plot.
+            positions (str or [str], optional): A single position or list of positions to include in the plot.
                 If None, all loaded positions are used. Defaults to None.
-            color_channels (Union[str, List[str]], optional): A single color channel or list of channels to plot.
+            color_channels (str or [str], optional): A single color channel or list of channels to plot.
                 If None, all loaded color channels are used. Defaults to None.
-            color (List[Tuple[int, int, int]], optional): List of RGB color tuples to use for visualizing each channel.
+            color ([(int,int,int)], optional): List of RGB color tuples (value range 0 to 255) to use for visualizing each channel.
                 If None, default color mappings are used by the plotting function. Defaults to None. needs to be of length(color_channels)
         """
         if color_channels is None:
@@ -861,8 +931,8 @@ class FluidExperiment:
         Retrieve data from nested dictionary structure based on position and color_channel.
         
         Args:
-            positions (str or list of str): Single or multiple position keys. Defaults to None = take all positions
-            color_channels (str or list of str): Single or multiple color_channel keys. Defaults to None = take all color_channels
+            positions (str or [str], optional): Single or multiple position keys. Defaults to None = take all positions
+            color_channels (str or [str], optional): Single or multiple color_channel keys. Defaults to None = take all color_channels
         
         Returns:
             dict: the nested results dictionary {"position": {"color_channel": pd.DataFrame}}.
@@ -894,7 +964,7 @@ class FluidExperiment:
         Args:
             column (str): The metadata column name to group positions by. Each unique value in the column
                 defines a group of positions whose data will be aggregated.
-            color_channels (Union[str, List[str]], optional): A single color channel or list of channels to include
+            color_channels (str or [str], optional): A single color channel or list of channels to include
                 in aggregation. If None, all loaded color channels are used. Defaults to None.
 
         Returns:
