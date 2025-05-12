@@ -3,6 +3,8 @@ import copy
 import pandas as pd
 import numpy as np
 import h5py
+from IPython.display import display
+from collections import OrderedDict
 from typing import Union, List, Callable, Tuple
 from analysis.utilities import (
                                       plot_frame_cv2_jupyter_dict,
@@ -13,6 +15,8 @@ from analysis.local_neighborhood import compute_neighborhood_segmentation
 from plotting.histogram import plot_histogram, plot_value_count_histogram
 from plotting.rate_plots import plot_growth_rate_with_ribbon
 from plotting.qc_plots import plot_qc_xy_correlation
+from plotting.result_plots import summary_plot
+from report.data_summary import data_summary
 from mutate.fuse import fuse_track_output
 from mutate.filter import filter_by_column
 from mutate.load import load_tracking_data, load_segmentations_h5
@@ -41,25 +45,30 @@ class FluidExperiment:
 
     Methods:
         from_copy(other): Creates a copy of an existing `FluidExperiment` instance.
-        load(file_path): Loads a `FluidExperiment` object from an HDF5 file.
+        load(file_path): Loads a `FluidExperiment` object from an HDF5 file (previous save).
         save(file_path): Saves the `FluidExperiment` object to an HDF5 file.
-        filter_data(column, ...): Filters data based on specified criteria.
+        filter_data(column, ...): Filters data based on specified criteria (min occurence, min / max values etc).
         drop_positions(positions): Removes specified positions from the experiment.
         drop_color_channels(color_channels): Removes specified color channels from the experiment.
-        create_metdata_template(path, overwrite): Creates and exports a metadata template as a CSV file.
+        create_metadata_template(path, overwrite): Creates and exports a metadata template as a CSV file.
         load_metadata_template(path): Loads metadata from a CSV file.
         fuse(other): Fuses the current `FluidExperiment` with another `FluidExperiment`.
+        rename_color_channel(...): Renames a color channel in the experiment data.
+        rename_position(...): Renames a position in the experiment data.
         calculate_growth_rate(...): Calculates growth rates for the experiment data.
         calculate_local_neighborhood(...): Calculates local neighborhood densities for the data.
         calculate_transform_data(...): Adds transformed versions of specified columns to the data.
-        plot_qc_histograms(...): Plots QC histograms for selected samples.
-        plot_qc(...): Plots QC scatter plots for selected samples.
-        plot_life_cycle_histograms(...): Plots histograms for life cycle data.
-        plot_rates(...): Plots growth rates over time for the experiment.
-        plot_selected_frame(...): Plots a selected frame from the experiment data.
-        report_filter_history(): Prints the filter history for all positions and color channels.
+        add_bin_data(...): Adds descriptions of bins to each sample to the experiment data.
+        plot_qc_histograms(...): Plots QC histograms for selected samples / groups.
+        plot_qc(...): Plots QC scatter plots for selected samples and shows linear fit / R^2 (data vs frame within trackID).
+        plot_life_cycle_histograms(...): Plots histograms for life cycle data (histogram of trackID existence length).
+        plot_rates(...): Plots rates (i.e growth rate) over time for the experiment.
+        plot_selected_frame(...): Plots a selected frame from the experiment data (segmentation maps with colory by channel).
+        report_filter_history(): Prints the filter history (with sequence of filters applied / filter rate etc) for each positions and color channel.
         get_data(positions, color_channels): Retrieves data for specified positions and color channels.
         get_aggregate_data(column, color_channels): Aggregates data across groups defined by metadata.
+        report_data_summary(...): exports the summary data of the experiment in a long data format, compatible with statistical packages(i.e average length/area with bin and sample)
+        plot_data_summary(...): Plots the summary data of the experiment, comparing groups and bins
 
     Example:
         ```python
@@ -132,7 +141,8 @@ class FluidExperiment:
             self.color_channels =[os.path.basename(f) for f in os.scandir(os.path.join(path,self.positions[0])) if f.is_dir()]
         else:
             self.color_channels = self._save_select(color_channels)
-            
+         
+        # Create data objects    
         self.data = {}
         self.filter_history = {}
         self.metadata = None
@@ -487,7 +497,7 @@ class FluidExperiment:
                 self.filter_history[p].pop(c)
         self._update_information()
 
-    def create_metdata_template(self, path = None, overwrite = False):
+    def create_metadata_template(self, path = None, overwrite = False):
             """
             Creates and exports a metadata template as a CSV file.
             The template includes columns for position, group, experiment, and device_channel. 
@@ -583,7 +593,86 @@ class FluidExperiment:
 
         self._update_information()   
         
+    def rename_color_channel(self, 
+                             old_name: str, 
+                             new_name: str):
+        """
+        Rename a color channel in the experiment data.
+
+        Args:
+            old_name (str): The current name of the color channel to be renamed.
+            new_name (str): The new name for the color channel.
+
+        Returns:
+            None: The function updates the color channel names in place.
+        """
+        if old_name not in self.color_channels:
+            raise ValueError(f"Color channel '{old_name}' does not exist.")
+        if new_name in self.color_channels:
+            raise ValueError(f"Color channel '{new_name}' already exists.")
+        
+        for p in self.positions:
+            self.data[p][new_name] = self.data[p].pop(old_name)
+        self.color_channels.remove(old_name)
+        self.color_channels.append(new_name)
        
+    def rename_position(self,
+                        old_name: str, 
+                        new_name: str):
+        """
+        Rename a position in the experiment data while maintaining the original order
+        in positions, data, and filter history.
+
+        Args:
+            old_name (str): The current name of the position to be renamed.
+            new_name (str): The new name for the position.
+
+        Returns:
+            None: The function updates the position names in place.
+        """
+        if old_name not in self.positions:
+            raise ValueError(f"Position '{old_name}' does not exist.")
+        if new_name in self.positions:
+            raise ValueError(f"Position '{new_name}' already exists.")
+        
+        # Update data and filter history while preserving order
+        self.data = OrderedDict(
+            (new_name if key == old_name else key, value)
+            for key, value in self.data.items()
+        )
+        self.filter_history = OrderedDict(
+            (new_name if key == old_name else key, value)
+            for key, value in self.filter_history.items()
+        )
+        
+        # Update metadata if it exists
+        if self.metadata is not None:
+            self.metadata.rename(index={old_name: new_name}, inplace=True)
+        
+        # Replace the old name with the new name in the same index
+        index = self.positions.index(old_name)
+        self.positions[index] = new_name
+    
+    def add_bin_data(self, bin_data: dict, bin_column_name = "bins",):
+        """adds bin data to the experiment. bins are supplied as dictionary with integer lists
+        
+        Args:
+            bin_data (dict): dictionary with keys bin names, and values as lists of integers representing bins. will be applied to each dataframe (all positions and color channels)
+            bin_column_name (str): name of the column to be added to the dataframes. defaults to "bins"
+            
+        Returns:
+            None: in place adds a column to each dataframe to keep track of the bin
+        """
+        print(f"Adding bin data to all positions and color channels")
+        for p in self.positions:
+            for c in self.color_channels:
+                print(f"Adding bin data to position {p} and color channel {c}")
+                # Create a new column with the bin data
+                self.data[p][c][bin_column_name] = None
+                for bin_name, bin_values in bin_data.items():
+                    # Assign the bin name to the rows that match the bin values
+                    self.data[p][c].loc[self.data[p][c]['frame'].isin(bin_values), bin_column_name] = bin_name
+        
 # ==========================================================    
 # ==================== CALCULATION METHODS =================
 # ==========================================================
@@ -704,7 +793,8 @@ class FluidExperiment:
                     case "inverse":
                         self.data[p][c][column + postfix] = np.reciprocal(self.data[p][c][column])
         self._update_information()            
-            
+
+
 # ==========================================================    
 # ==================== PLOTTING / REPORTING METHODS ========
 # ==========================================================                
@@ -919,13 +1009,126 @@ class FluidExperiment:
                         print(f"\t{k}: {v}")
                 print("\n")
       
+    def report_data_summary(self, 
+                            value_column: Union[str, List[str]],
+                            positions: Union[str, List[str]] = None,
+                            color_channels: Union[str, List[str]] = None, 
+                            use_bins: bool = False,
+                            bin_column_name: str = "bins",
+                            custom_function: Callable = None, 
+                            **custom_kwargs):
+        """for a given column in the data, prints a summary of the data. includes means value, standard deviation, all quartiles, min and max values
+
+        Args:
+            value_column (str or [str]): the columns to be summarized
+            positions (str or [str], optional): Single or multiple position keys. Defaults to None = take all positions
+            color_channels (str or [str], optional): Single or multiple color_channel keys. Defaults to None = take all color_channels
+            use_bins (bool): if True, will summarize the data by bins. defaults to False
+            bin_column_name (str): name of the column to be used for binning. defaults to "bins"
+            custom_function (function): custom function to be used for calculation. defaults to = None
+            **custom_kwargs : additional arguments the custom function may take
+        Return:
+            report (pd.DataFrame): a dataframe with the summary statistics
+        """
+        
+        report = pd.DataFrame()
+        
+        if positions is None:
+            positions = self.positions
+        if color_channels is None:
+            color_channels = self.color_channels
+        positions = self._save_select(positions)
+        color_channels = self._save_select(color_channels)
+        value_column = self._save_select(value_column)
+        
+        data = self.get_data(positions, color_channels)
+            
+        for p in positions:
+            for c in color_channels:
+                for col in value_column:
+                    if col not in data[p][c].columns:
+                        print(f"Column '{col}' not found in data of position '{p}' in color channel '{c}'.")
+                        continue
+                    
+                    # we check if we need to use bins
+                    if use_bins:
+                        if bin_column_name not in data[p][c].columns:
+                            print(f"Column '{bin_column_name}' not found in data of position '{p}' in color channel '{c}'.")
+                            continue
+                        
+                        for b in data[p][c][bin_column_name].dropna().unique():
+                            if custom_function is not None:
+                                summary = custom_function(data[p][c][col][data[p][c][bin_column_name] == b], **custom_kwargs)
+                            else:
+                                summary = data_summary(data[p][c][col][data[p][c][bin_column_name] == b])
+                            summary['position'] = p
+                            summary['color_channel'] = c
+                            summary['column'] = col
+                            summary[bin_column_name] = b
+                            row_data = pd.DataFrame.from_dict({f"{p}_{c}_{col}_{b}": summary}, orient='index')
+                            report = pd.concat([report,row_data])
+                    else: #standard no bin case
+                        if custom_function is not None:
+                            summary = custom_function(data[p][c][col], **custom_kwargs)
+                        else:
+                            summary = data_summary(data[p][c][col])
+                        summary['position'] = p
+                        summary['color_channel'] = c
+                        summary['column'] = col
+                        row_data = pd.DataFrame.from_dict({f"{p}_{c}_{col}": summary}, orient='index')
+                        report = pd.concat([report,row_data])
+        return report
+                    
+    def plot_data_summary(self,
+                          value_columns: Union[str, List[str]],
+                          use_bins: bool = False,
+                          group_by: str = None,
+                          bin_column_name: str = "bins"):
+        """ Plots a summary of the data for a given column in the experiment.
+
+        Args:
+            value_columns (str or [str]): The columns to be summarized.
+            use_bins (bool): If True, will summarize the data by bins. Defaults to False. requires bin_column_name to be present in the data (use add_bin_data() to add bins)
+            group_by (str, optional): Metadata column name to group data on plot by.
+            bin_column_name (str): Name of the column to be used for binning. Defaults to "bins".
+
+        Raises:
+            ValueError: If the specified bin_column_name is not found in the data but bin activated.
+            AttributeError: If the experiment does not have any metadata and group_by is specified.
+            ValueError: If the specified group_by column is not found in the metadata.
+
+        Returns:
+            None: The function generates plots but does not return any value.
+        """
+        
+        data = self.report_data_summary(value_columns, use_bins = use_bins, bin_column_name = bin_column_name)
+        if use_bins and bin_column_name not in data.columns:
+            raise ValueError(f"Column '{bin_column_name}' not found in data.")
+        if group_by is not None and self.metadata is None:
+            raise AttributeError("Experiment does not have any metadata, use load_metadata_template first")
+        if group_by is not None and group_by not in self.metadata.columns:
+            raise ValueError(f"Column '{group_by}' not found in metadata.")
+        if group_by is not None:
+            data = data.merge(self.metadata[[group_by]], left_on = "position", right_index = True)
+        
+        if use_bins and group_by is not None:
+            p1 = summary_plot(data,value_column="mean", group_column=group_by, bins_column= bin_column_name, subsetting1= "column", subsetting2="color_channel") 
+        elif not use_bins and group_by is not None:
+            p1 = summary_plot(data,value_column="mean", group_column=group_by, subsetting1= "column", subsetting2="color_channel")
+        elif use_bins and group_by is None:
+            p1 = summary_plot(data,value_column="mean", group_column="color_channel", bins_column= bin_column_name, subsetting1= "column")
+        else:
+            p1 = summary_plot(data,value_column="mean", group_column="color_channel", subsetting1= "column")
+        display(p1)
+        
 # ==========================================================    
 # ==================== EXPORT METHODS ======================
 # ==========================================================            
 
     def get_data(self, 
         positions: Union[str, List[str]] = None, 
-        color_channels: Union[str, List[str]] = None
+        color_channels: Union[str, List[str]] = None,
+        frames: List[int] = None,
         ) -> dict:
         """
         Retrieve data from nested dictionary structure based on position and color_channel.
@@ -944,13 +1147,20 @@ class FluidExperiment:
         positions = self._save_select(positions)
         color_channels = self._save_select(color_channels)
         
-        return {
+        export = {
             pos: {
                 ch: self.data[pos][ch].copy()
                 for ch in color_channels
             }
             for pos in positions
         }
+        
+        if frames is not None:
+            for pos in positions:
+                for ch in color_channels:
+                    export[pos][ch] = export[pos][ch].loc[export[pos][ch]['frame'].isin(frames)]
+        
+        return export
         
     def get_aggregate_data(self, 
                            column: str, 
@@ -977,7 +1187,7 @@ class FluidExperiment:
         
         if color_channels is None:
             color_channels = self.color_channels
-        
+
         grouped_positions = (
             self.metadata.groupby(column)['position']
             .apply(list)
