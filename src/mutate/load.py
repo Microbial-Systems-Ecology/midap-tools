@@ -20,3 +20,11 @@ def load_segmentations_h5(path, group, binary = True):
         data = data > 0
         
     return data
+
+def load_tracking_h5(path, group):
+    res_path = os.path.join(path,group, "track_output","tracking*.h5")
+    tracking_file = glob.glob(res_path)[0]
+    
+    with h5py.File(tracking_file, 'r') as f:
+        data = f["labels"][:]
+    return data

@@ -6,20 +6,19 @@ import h5py
 from IPython.display import display
 from collections import OrderedDict
 from typing import Union, List, Callable, Tuple
-from analysis.utilities import (
-                                      plot_frame_cv2_jupyter_dict,
+from fluid_experiment.utilities import (
                                       sort_folder_names,
                                       )
 from analysis.growth_rate import calculate_growth_rate
 from analysis.local_neighborhood import compute_neighborhood_segmentation
 from plotting.histogram import plot_histogram, plot_value_count_histogram
 from plotting.rate_plots import plot_growth_rate_with_ribbon
-from plotting.qc_plots import plot_qc_xy_correlation
+from plotting.qc_plots import plot_qc_xy_correlation, plot_frame_cv2_jupyter_dict, plot_xy_correlation, plot_spatial_maps
 from plotting.result_plots import summary_plot
 from report.data_summary import data_summary
 from mutate.fuse import fuse_track_output
 from mutate.filter import filter_by_column
-from mutate.load import load_tracking_data, load_segmentations_h5
+from mutate.load import load_tracking_data, load_segmentations_h5, load_tracking_h5
 
 class FluidExperiment:
     """
@@ -63,7 +62,7 @@ class FluidExperiment:
         plot_qc(...): Plots QC scatter plots for selected samples and shows linear fit / R^2 (data vs frame within trackID).
         plot_life_cycle_histograms(...): Plots histograms for life cycle data (histogram of trackID existence length).
         plot_rates(...): Plots rates (i.e growth rate) over time for the experiment.
-        plot_selected_frame(...): Plots a selected frame from the experiment data (segmentation maps with colory by channel).
+        plot_selected_frame(...): Plots a selected frame from the experiment data (segmentation maps with color by channel).
         report_filter_history(): Prints the filter history (with sequence of filters applied / filter rate etc) for each positions and color channel.
         get_data(positions, color_channels): Retrieves data for specified positions and color channels.
         get_aggregate_data(column, color_channels): Aggregates data across groups defined by metadata.
@@ -151,8 +150,11 @@ class FluidExperiment:
             self.data[p] = {}
             self.filter_history[p] = {}
             for g in self.color_channels:
-                print(f"Loading sample at position {p} for group {g}")
-                self.data[p][g] = load_tracking_data(os.path.join(path,p),g)
+                print(f"Loading sample at position {p} for color channel {g}")
+                try:
+                    self.data[p][g] = load_tracking_data(os.path.join(path,p),g)
+                except Exception as e:
+                    raise RuntimeError(f"Could not load tracking data at position {p} and color channel {g}. Check if the folder contains valid data")
                 self.filter_history[p][g] = []
         
         self._update_information()
@@ -225,11 +227,17 @@ class FluidExperiment:
                 position_group = data_group[p]
                 for c in instance.color_channels:
                     channel_group = position_group[c]
-                    df_dict = {
-                        col: [val.decode('utf-8') if isinstance(val, bytes) else val for val in channel_group[col][...]]
-                        if channel_group[col].dtype.kind == 'S' else channel_group[col][...]
-                        for col in channel_group
-                    }
+                    df_dict = {}
+                    for col in channel_group:
+                        data = channel_group[col][...]
+                        # Decode if byte strings, otherwise leave as is
+                        if isinstance(data[0], bytes):
+                            decoded = [val.decode('utf-8') for val in data]
+                            # Optionally convert empty strings or 'None' back to np.nan
+                            decoded = [val if val not in ('', 'None', 'nan') else np.nan for val in decoded]
+                            df_dict[col] = decoded
+                        else:
+                            df_dict[col] = data
                     instance.data[p][c] = pd.DataFrame(df_dict)
 
             # Load filter history
@@ -722,7 +730,8 @@ class FluidExperiment:
    
     def calculate_local_neighborhood(self, 
                                      distance_threshold: int, 
-                                     neighborhood_prefix = "density_", 
+                                     neighborhood_prefix = "density_",
+                                     include_empty: bool = True,
                                      custom_function: Callable = None, 
                                      **custom_kwargs):
         """
@@ -733,6 +742,7 @@ class FluidExperiment:
         Args:
             distance_threshold (int): The radius of the circular region (in pixels) used to compute the neighborhood density.
             neighborhood_prefix (str, optional): A prefix for the column names added to the data. Defaults to "density_".
+            include_empty (bool, optional): If True, includes empty regions in the neighborhood calculation. Defaults to True.
             custom_function (function, optional): A custom function for neighborhood calculation. Defaults to None, 
                                                 which uses the default method.
             **custom_kwargs: Additional arguments for the custom function.
@@ -751,13 +761,15 @@ class FluidExperiment:
                 self.data[p] = compute_neighborhood_segmentation(self.data[p],
                                                                  mask, 
                                                                  neighborhood_prefix,
-                                                                 distance_threshold)
+                                                                 distance_threshold,
+                                                                 include_empty)
             else:
                 #in case the user specified a custom function
                 self.data[p] = custom_function(self.data[p],
                                                mask, 
-                                               distance_threshold, 
                                                neighborhood_prefix,
+                                               distance_threshold, 
+                                               include_empty
                                                **custom_kwargs)
         self._update_information()
  
@@ -875,6 +887,48 @@ class FluidExperiment:
                                     n = n_samples,
                                     title = f"{k}, {k2}, {id_column}")
 
+    def plot_xy_correlation(self,
+                            x_column: str,
+                            y_column: str,
+                            positions: Union[str, List[str]] = None, 
+                            color_channels: Union[str, List[str]] = None, 
+                            group_by: str = None):
+        """
+        Plots a scatter plot of two specified columns for selected samples.
+        Args:
+            x_column (str): The column to be plotted on the x-axis.
+            y_column (str): The column to be plotted on the y-axis.
+            positions (str or [str], optional): List of positions to include in the plot. Defaults to None, 
+                                                which includes all positions.
+            color_channels (str or [str], optional): List of color channels to include in the plot. Defaults to None, 
+                                                    which includes all color channels.
+            group_by (str, optional): Metadata column name to group data by for aggregation. If specified, 
+                                    positions are ignored.
+        """
+        if positions is not None and group_by is not None:
+            print("can not select groups and positions, ignoring positions selection for plot")    
+        if positions is None:
+            positions = self.positions
+        if color_channels is None:
+            color_channels = self.color_channels
+        
+        if group_by is not None:
+            pdat = self.get_aggregate_data(group_by, 
+                                           color_channels)
+            for k, v in pdat.items():
+                plot_xy_correlation(v,
+                                    x_column, 
+                                    y_column,
+                                    title = f"xy correlation of aggregated data {k}")
+            return
+        else:
+            pdat = self.get_data(positions, color_channels)
+            for k, v in pdat.items():
+                plot_xy_correlation(v,
+                                    x_column, 
+                                    y_column,
+                                    title = f"xy correlation of position data {k}")
+
     def plot_life_cycle_histograms(self, 
                                     columns: Union[str, List[str]], 
                                     positions: Union[str, List[str]] = None, 
@@ -991,6 +1045,42 @@ class FluidExperiment:
             for c in color_channels:
                 array[c] = load_segmentations_h5(os.path.join(self.path, p),c)
             plot_frame_cv2_jupyter_dict(array,frame, color, title = f"{p}: Overlay of Channels")
+ 
+    def plot_spatial_maps(self,
+                                       frame: int,
+                                       property_column: str,
+                                       positions: Union[str, List[str]] = None,
+                                       color_channels: Union[str, List[str]] = None
+                                       ):
+        """
+        Plots spatial maps for a specified frame and property column.
+        This method generates spatial maps for the specified frame and property column,
+        using the data from the specified positions and color channels.
+        Args:
+            frame (int): The frame number to plot.
+            property_column (str): The column name representing the property to plot colors by.
+            positions (str or [str]): A single position or list of positions to include in the plot.
+                If None, all loaded positions are used. Defaults to None.
+            color_channels (str or [str], optional): A single color channel or list of channels to plot.
+                If None, all loaded color channels are used. Defaults to None.
+        """
+        if color_channels is None:
+            color_channels = self.color_channels   
+        color_channels = self._save_select(color_channels)
+            
+        if positions is None:
+            positions = self.positions
+        positions = self._save_select(positions)
+            
+        for p in positions:
+            array = {}
+            for c in color_channels:
+                array[c] = load_tracking_h5(os.path.join(self.path, p),c)
+            plot_spatial_maps(array, 
+                              self.data[p], 
+                              property = property_column, 
+                              frame_number= frame,
+                              title= f"{p}: spatial map of {property_column}",)
  
     def report_filter_history(self):
         """
@@ -1226,8 +1316,15 @@ class FluidExperiment:
                     channel_group = position_group.create_group(c)
                     df = self.data[p][c]
                     for col in df.columns:
-                        channel_group.create_dataset(col, data=df[col].values)
-
+                        col_data = df[col].values
+                        if np.issubdtype(col_data.dtype, np.number):
+                            channel_group.create_dataset(col, data=col_data)
+                        else:
+                            # Force conversion to object dtype, then save with variable-length UTF-8 string type
+                            str_data = col_data.astype(str).astype('object')
+                            str_dtype = h5py.string_dtype(encoding='utf-8')
+                            channel_group.create_dataset(col, data=str_data, dtype=str_dtype)
+                            
             # Save filter history
             filter_history_group = h5file.create_group('filter_history')
             for p in self.positions:

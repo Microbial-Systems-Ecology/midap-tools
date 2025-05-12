@@ -1,7 +1,11 @@
 import numpy as np
 import pandas as pd
 
-def compute_neighborhood_segmentation(data: dict, masks, neighborhood_prefix: str = "density_", distance_threshold: int =50):
+def compute_neighborhood_segmentation(data: dict, 
+                                      masks, 
+                                      neighborhood_prefix: str = "density_", 
+                                      distance_threshold: int = 50,
+                                      include_empty: bool = True):
     """
     Computes neighborhood segmentation densities for a set of target points within a given distance threshold.
     This function calculates the density of overlap between a circular region around each target point and a set of binary masks. 
@@ -25,6 +29,9 @@ def compute_neighborhood_segmentation(data: dict, masks, neighborhood_prefix: st
 
     neighborhood_prefix : str, optional
         A prefix for the column names added to the target DataFrames. Default is "density_".
+        
+    include_empty : bool, optional
+        If True, the density is calculated as the ratio of the overlapping area to the total area of the circular region.
 
     distance_threshold : int, optional
         The rixeadius of the circular region (in pls) used to compute the neighborhood density. Default is 50.
@@ -69,7 +76,15 @@ def compute_neighborhood_segmentation(data: dict, masks, neighborhood_prefix: st
                 circle_submask = circle_mask[cx0:cx1, cy0:cy1]
 
                 region = mask[frame, x0_clip:x1_clip, y0_clip:y1_clip]
-                valid_area = circle_submask.sum()
+                if include_empty:
+                    valid_area = circle_submask.sum()
+                else:
+                    # Sum over all masks for the denominator
+                    total_overlap = 0
+                    for other_mask in masks.values():
+                        other_region = other_mask[frame, x0_clip:x1_clip, y0_clip:y1_clip]
+                        total_overlap += np.logical_and(other_region, circle_submask).sum()
+                    valid_area = total_overlap
                 overlap = np.logical_and(region, circle_submask).sum()
 
                 ratio = overlap / valid_area if valid_area > 0 else 0.0

@@ -130,7 +130,7 @@ def test_create_metadata_template(fluid_experiment, tmp_path):
     Test the create_metdata_template method.
     """
     metadata_path = tmp_path / "metadata.csv"
-    fluid_experiment.create_metdata_template(path=metadata_path, overwrite=True)
+    fluid_experiment.create_metadata_template(path=metadata_path, overwrite=True)
     assert metadata_path.exists()
     df = pd.read_csv(metadata_path)
     assert set(df.columns) == {"position", "group", "experiment", "device_channel"}
@@ -140,7 +140,7 @@ def test_load_metadata_template(fluid_experiment, tmp_path):
     Test the load_metadata_template method.
     """
     metadata_path = tmp_path / "metadata.csv"
-    fluid_experiment.create_metdata_template(path=metadata_path, overwrite=True)
+    fluid_experiment.create_metadata_template(path=metadata_path, overwrite=True)
     fluid_experiment.load_metadata_template(path=metadata_path)
     assert fluid_experiment.metadata is not None
     assert set(fluid_experiment.metadata.columns) == {"position", "group", "experiment", "device_channel"}
