@@ -225,7 +225,7 @@ def plot_spatial_maps(array_dict: dict,
                       frame_number=0,
                       title = None):
     """
-    Plots spatial maps of cell property
+    Plots spatial maps of cell property. Adapted from code received from Simon van Vilet
     
     Parameters:
         label_stack (dict np.ndarray):  Numpy ND array [t,y,x] with label image stack

@@ -12,7 +12,6 @@ def get_requirements():
         "statsmodels",
         "pytest",
         "scikit-learn",
-        "pytables",
         "plotnine"
     ]
 
