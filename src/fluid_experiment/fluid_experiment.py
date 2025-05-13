@@ -54,15 +54,17 @@ class FluidExperiment:
         fuse(other): Fuses the current `FluidExperiment` with another `FluidExperiment`.
         rename_color_channel(...): Renames a color channel in the experiment data.
         rename_position(...): Renames a position in the experiment data.
+        add_bin_data(...): Adds descriptions of bins to each sample to the experiment data.
         calculate_growth_rate(...): Calculates growth rates for the experiment data.
         calculate_local_neighborhood(...): Calculates local neighborhood densities for the data.
         calculate_transform_data(...): Adds transformed versions of specified columns to the data.
-        add_bin_data(...): Adds descriptions of bins to each sample to the experiment data.
         plot_qc_histograms(...): Plots QC histograms for selected samples / groups.
         plot_qc(...): Plots QC scatter plots for selected samples and shows linear fit / R^2 (data vs frame within trackID).
+        plot_xy_correlation(...): Plots XY correlation for selected columns within samples / groups.
         plot_life_cycle_histograms(...): Plots histograms for life cycle data (histogram of trackID existence length).
         plot_rates(...): Plots rates (i.e growth rate) over time for the experiment.
         plot_selected_frame(...): Plots a selected frame from the experiment data (segmentation maps with color by channel).
+        plot_spatial_maps(...): Plots spatial maps (cells colored by a selected attribute (i.e growth rate)) at a selected frame
         report_filter_history(): Prints the filter history (with sequence of filters applied / filter rate etc) for each positions and color channel.
         get_data(positions, color_channels): Retrieves data for specified positions and color channels.
         get_aggregate_data(column, color_channels): Aggregates data across groups defined by metadata.
@@ -1054,8 +1056,9 @@ class FluidExperiment:
                                        ):
         """
         Plots spatial maps for a specified frame and property column.
+        Spatial maps are segmenation plots colored by a selected attribute (i.e growth rate, major axis length etc)
         This method generates spatial maps for the specified frame and property column,
-        using the data from the specified positions and color channels.
+        optionally, using the data from only the specified positions and color channels.
         Args:
             frame (int): The frame number to plot.
             property_column (str): The column name representing the property to plot colors by.
@@ -1071,16 +1074,18 @@ class FluidExperiment:
         if positions is None:
             positions = self.positions
         positions = self._save_select(positions)
+        
+        data = self.get_data(positions, color_channels)
             
         for p in positions:
             array = {}
             for c in color_channels:
                 array[c] = load_tracking_h5(os.path.join(self.path, p),c)
             plot_spatial_maps(array, 
-                              self.data[p], 
+                              data[p], 
                               property = property_column, 
                               frame_number= frame,
-                              title= f"{p}: spatial map of {property_column}",)
+                              title= f"{p}: spatial map of {property_column} at frame {frame}",)
  
     def report_filter_history(self):
         """

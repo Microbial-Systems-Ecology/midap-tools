@@ -241,6 +241,9 @@ def plot_spatial_maps(array_dict: dict,
     colMap.set_bad(color='black')
     n_col = len(df_dict)
     fig, axs = plt.subplots(1, n_col, figsize=(n_col * 5, 5))
+    if n_col == 1:
+        axs = [axs]
+
     
     for i, items in enumerate(zip(df_dict.keys(), array_dict.values() , df_dict.values())):
         k , label_stack, df = items
