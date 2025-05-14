@@ -35,9 +35,8 @@ def calculate_growth_rate(df: pd.DataFrame,
 
         for i in range(len(values)):
             if i + integration_window < len(values):
-                future_values = values[i + 1:i + 1 + integration_window]
-                future_avg = np.mean(future_values)
-                growth_rates[i] = (future_avg - values[i]) / integration_window
+                future_deltas = np.subtract(values[i + 1:i + 1 + integration_window], values[i:i + integration_window])
+                growth_rates[i] = np.mean(future_deltas)
             else:
                 growth_rates[i] = np.nan
 
@@ -90,10 +89,10 @@ def calculate_growth_rate_r2(df: pd.DataFrame,
                 # Linear regression for R-squared calculation
                 model = LinearRegression()
                 model.fit(future_frames, future_values)
+                slope = model.coef_[0]
                 r2 = model.score(future_frames, future_values)
 
-                future_avg = np.mean(future_values)
-                growth_rates[i] = (future_avg - values[i]) / integration_window
+                growth_rates[i] = slope
                 r_squared[i] = r2
             else:
                 growth_rates[i] = np.nan
