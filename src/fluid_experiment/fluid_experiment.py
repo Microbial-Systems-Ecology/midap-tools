@@ -799,13 +799,14 @@ class FluidExperiment:
             for c in self.color_channels:
                 if custom_function is not None:
                     self.data[p][c][column + postfix] = custom_function(self.data[p][c][column], **custom_kwargs)
-                match type:
-                    case "log":
-                        self.data[p][c][column + postfix] = np.log(self.data[p][c][column])
-                    case "square":
-                        self.data[p][c][column + postfix] = np.square(self.data[p][c][column])
-                    case "inverse":
-                        self.data[p][c][column + postfix] = np.reciprocal(self.data[p][c][column])
+                else:
+                    match type:
+                        case "log":
+                            self.data[p][c][column + postfix] = np.log(self.data[p][c][column])
+                        case "square":
+                            self.data[p][c][column + postfix] = np.square(self.data[p][c][column])
+                        case "inverse":
+                            self.data[p][c][column + postfix] = np.reciprocal(self.data[p][c][column])
         self._update_information()            
 
 
