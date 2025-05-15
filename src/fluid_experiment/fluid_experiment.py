@@ -663,6 +663,32 @@ class FluidExperiment:
         index = self.positions.index(old_name)
         self.positions[index] = new_name
     
+    def rename_data_column(self,
+                           original_name: str,
+                           new_name: str):
+        """
+        Rename a column in the dataframes of the experiment.
+        This method updates the column name in all dataframes across all positions and color channels.
+        replaces any existing column with the same name
+        Args:
+            original_name (str): The current name of the column to be renamed.
+            new_name (str): The new name for the column.
+        Returns:
+            None: The function updates the column names in place.
+
+        """
+        for p in self.positions:
+            for c in self.color_channels:
+                if original_name not in self.data[p][c].columns:
+                    raise ValueError(f"Column '{original_name}' does not exist in position {p} and color channel {c}.")
+        
+        for p in self.positions:
+            for c in self.color_channels:
+                if original_name in self.data[p][c].columns:
+                    self.data[p][c][new_name] = self.data[p][c].pop(original_name)
+        self._update_information()
+                    
+    
     def add_bin_data(self, bin_data: dict, bin_column_name = "bins",):
         """adds bin data to the experiment. bins are supplied as dictionary with integer lists
         
@@ -808,7 +834,6 @@ class FluidExperiment:
                         case "inverse":
                             self.data[p][c][column + postfix] = np.reciprocal(self.data[p][c][column])
         self._update_information()            
-
 
 # ==========================================================    
 # ==================== PLOTTING / REPORTING METHODS ========

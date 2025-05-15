@@ -32,8 +32,8 @@ def plot_growth_rate_with_ribbon(
         if title is None:
             title = "Mean Growth Rate per Frame with SEM Ribbon"
         plt.title(title)
-        plt.xlabel("Frame")
-        plt.ylabel("Growth Rate")
+        plt.xlabel(frame_column)
+        plt.ylabel(growth_column)
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
@@ -62,8 +62,8 @@ def plot_growth_rate_with_ribbon(
         if group_name is not None:
             title = f"{group_name}: {title}"
         plt.title(title)
-        plt.xlabel("Frame")
-        plt.ylabel("Growth Rate")
+        plt.xlabel(frame_column)
+        plt.ylabel(growth_column)
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
