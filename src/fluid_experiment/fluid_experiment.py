@@ -415,6 +415,23 @@ class FluidExperiment:
             existing_positions.add(new_position)
         return unique_positions
 
+    def _flip_dict(self, d: dict) -> dict:
+        """
+        Flips a nested dictionary to have the outer keys as inner keys and vice versa.
+
+        Args:
+            d (dict): The dictionary to be flipped.
+
+        Returns:
+            flipped_dict (dict): The flipped dictionary.
+        """
+        flipped_dict = {}
+        for outer_key, inner_dict in d.items():
+            for inner_key, value in inner_dict.items():
+                if inner_key not in flipped_dict:
+                    flipped_dict[inner_key] = {}
+                flipped_dict[inner_key][outer_key] = value
+        return flipped_dict
 # ==========================================================    
 # ==================== MUTATION METHODS ====================
 # ==========================================================
@@ -686,8 +703,7 @@ class FluidExperiment:
             for c in self.color_channels:
                 if original_name in self.data[p][c].columns:
                     self.data[p][c][new_name] = self.data[p][c].pop(original_name)
-        self._update_information()
-                    
+        self._update_information()                   
     
     def add_bin_data(self, bin_data: dict, bin_column_name = "bins",):
         """adds bin data to the experiment. bins are supplied as dictionary with integer lists
@@ -999,7 +1015,8 @@ class FluidExperiment:
                    positions: Union[str, List[str]] = None, 
                    color_channels: Union[str, List[str]] = None, 
                    title: str = None, 
-                   group_by: str = None):
+                   group_by: str = None,
+                   flip_grouping: bool = False):
         """
         Plots the growth rate over time for the experiment.
         This function generates line plots with ribbons representing the growth rate over time. 
@@ -1027,6 +1044,8 @@ class FluidExperiment:
             
         if group_by is not None:
             pdat = self.get_aggregate_data(group_by, color_channels)
+            if flip_grouping:
+                pdat = self._flip_dict(pdat)
             for k, v in pdat.items():
                 plot_growth_rate_with_ribbon(v, 
                                              rate_column,
@@ -1035,6 +1054,8 @@ class FluidExperiment:
             return
         else:
             pdat = self.get_data(positions, color_channels)
+            if flip_grouping:
+                pdat = self._flip_dict(pdat)
             for k, v in pdat.items():
                 plot_growth_rate_with_ribbon(v, 
                                              rate_column, 
