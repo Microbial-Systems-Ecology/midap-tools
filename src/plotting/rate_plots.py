@@ -1,4 +1,6 @@
 import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
 
 def plot_growth_rate_with_ribbon(
     df,
@@ -68,3 +70,31 @@ def plot_growth_rate_with_ribbon(
         plt.grid(True)
         plt.tight_layout()
         plt.show()
+        
+
+def xy_slope_rate_plot(df: pd.DataFrame, 
+                       time: str = "time", 
+                       row: str = "group1", 
+                       col: str ="metric", 
+                       hue: str = "group2", 
+                       value: str = "slope",
+                       time_legend: str = "Time (frames)",
+                       value_legend: str = "Slope",
+                       group_legend: str = "Group"):
+    """takes a nested dictionary of scores (created by xy movie) and plots the slope of xy correlations over time
+
+    Args:
+        scores_dict (dict): nested dictionary of scores
+        time_legend (str): legend for the time axis
+    """
+    g = sns.FacetGrid(df, row = row, col=col, hue=hue, height=4, aspect=1.5, palette='tab10')
+
+    g.map(sns.lineplot, time, value)
+    for ax in g.axes.flat:
+        ax.axhline(0, color='gray', linestyle='--', linewidth=1)
+
+    g.add_legend(title=group_legend)
+    g.set_axis_labels(time_legend, value_legend)
+    g.set_titles(col_template="{col_name}")
+    plt.tight_layout()
+    plt.show()

@@ -219,6 +219,88 @@ def plot_xy_correlation(
 
 
 
+def plot_xy_correlation_stacked(
+    df: Union[pd.DataFrame, dict],
+    x: str,
+    y: str,
+    title: str = None,
+    xlim = None,
+    ylim = None,
+) -> plt.Figure:
+    """
+    Creates a plot of XY scatter data with linear regression fits.
+    If input is a dict of DataFrames, each is plotted in the same axes with a distinct color.
+
+    Args:
+        df (pd.DataFrame or dict of pd.DataFrame): Input data.
+        x (str): X-axis column name.
+        y (str): Y-axis column name.
+        title (str): Optional plot title.
+
+    Returns:
+        matplotlib.figure.Figure: The figure object containing the plot.
+    """
+    if isinstance(df, pd.DataFrame):
+        df = {"Dataset": df}  # Normalize to dict format
+
+    if not isinstance(df, dict):
+        raise TypeError("Input must be a DataFrame or a dict of DataFrames.")
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    colors = plt.cm.tab10.colors
+    summary_texts = []
+    
+    scores = {}
+
+    for idx, (name, data) in enumerate(df.items()):
+        scores[name] = {}
+        if x not in data.columns or y not in data.columns:
+            raise ValueError(f"Columns '{x}' and/or '{y}' not found in dataset '{name}'.")
+
+        x_vals = data[x].dropna()
+        y_vals = data[y].dropna()
+        common_index = x_vals.index.intersection(y_vals.index)
+
+        x_clean = x_vals.loc[common_index].values.reshape(-1, 1)
+        y_clean = y_vals.loc[common_index].values
+
+        model = LinearRegression()
+        model.fit(x_clean, y_clean)
+        y_pred = model.predict(x_clean)
+        r2 = r2_score(y_clean, y_pred)
+
+        color = colors[idx % len(colors)]
+        ax.scatter(x_clean, y_clean, alpha=0.6, label=f'{name} Data', color=color)
+        ax.plot(x_clean, y_pred, color=color, linewidth=2, label=f'{name} Fit')
+        scores[name]["slope"] = model.coef_[0]
+        scores[name]["intercept"] = model.intercept_
+        scores[name]["r2"] = r2
+
+        summary_texts.append(
+            f"{name}:\n  y = {model.coef_[0]:.3f}x + {model.intercept_:.3f}\n  $R^2$ = {r2:.3f}"
+        )
+
+    ax.set_xlabel(x)
+    ax.set_ylabel(y)
+    ax.set_title(title or f'{y} vs {x}')
+    ax.legend()
+    ax.grid(True)
+    if xlim:
+        ax.set_xlim(xlim)
+    if ylim:
+        ax.set_ylim(ylim)
+
+    full_summary = "\n\n".join(summary_texts)
+    # Adjust text position to fit within extended figure width
+    fig.text(0.85, 0.5, full_summary, fontsize=10, va='center', ha='left',
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.7),
+            transform=fig.transFigure)
+
+    # Adjust layout so that the plotting area doesn't overlap with text
+    fig.tight_layout(rect=[0, 0, 0.8, 1])  # Reserve right 20% for stats
+    return fig, scores
+
+
 def plot_spatial_maps(array_dict: dict,
                       df_dict: dict,
                       property: str,

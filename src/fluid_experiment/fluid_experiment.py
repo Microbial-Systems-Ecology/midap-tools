@@ -3,7 +3,10 @@ import copy
 import pandas as pd
 import numpy as np
 import h5py
+import imageio
+import shutil
 from IPython.display import display
+import matplotlib.pyplot as plt
 from collections import OrderedDict
 from typing import Union, List, Callable, Tuple
 from fluid_experiment.utilities import (
@@ -11,9 +14,10 @@ from fluid_experiment.utilities import (
                                       )
 from analysis.growth_rate import calculate_growth_rate
 from analysis.local_neighborhood import compute_neighborhood_segmentation
+from analysis.global_metrics import compute_global_axes, collect_unique_column_values
 from plotting.histogram import plot_histogram, plot_value_count_histogram
-from plotting.rate_plots import plot_growth_rate_with_ribbon
-from plotting.qc_plots import plot_qc_xy_correlation, plot_frame_cv2_jupyter_dict, plot_xy_correlation, plot_spatial_maps
+from plotting.rate_plots import plot_growth_rate_with_ribbon, xy_slope_rate_plot
+from plotting.qc_plots import plot_qc_xy_correlation, plot_frame_cv2_jupyter_dict, plot_xy_correlation, plot_spatial_maps, plot_xy_correlation_stacked
 from plotting.result_plots import summary_plot
 from report.data_summary import data_summary
 from mutate.fuse import fuse_track_output
@@ -936,7 +940,8 @@ class FluidExperiment:
                             y_column: str,
                             positions: Union[str, List[str]] = None, 
                             color_channels: Union[str, List[str]] = None, 
-                            group_by: str = None):
+                            group_by: str = None,
+                            flip_grouping: bool = False):
         """
         Plots a scatter plot of two specified columns for selected samples.
         Args:
@@ -959,19 +964,125 @@ class FluidExperiment:
         if group_by is not None:
             pdat = self.get_aggregate_data(group_by, 
                                            color_channels)
-            for k, v in pdat.items():
-                plot_xy_correlation(v,
-                                    x_column, 
-                                    y_column,
-                                    title = f"xy correlation of aggregated data {k}")
-            return
         else:
             pdat = self.get_data(positions, color_channels)
+        if flip_grouping:
+            pdat = self._flip_dict(pdat)
+        for k, v in pdat.items():
+            plot_xy_correlation(v,
+                                x_column, 
+                                y_column,
+                                title = f"xy correlations for {k}")
+            
+    def plot_xy_correlation_over_time(self,
+                            x_column: Union[str, List[str]],
+                            y_column: str,
+                            frame_column: str = "frame",
+                            positions: Union[str, List[str]] = None, 
+                            color_channels: Union[str, List[str]] = None, 
+                            group_by: str = None,
+                            flip_grouping: bool = False,
+                            outfile:str ='xy_animation',
+                            xlim: Tuple = None,
+                            ylim: Tuple = None):
+        """
+        Plots a scatter plot of two specified columns for selected samples.
+        Args:
+            x_column (str or [str]): The column(s) to be plotted on the x-axis. note, for each column separate animations will be created
+            y_column (str): The column to be plotted on the y-axis.
+            positions (str or [str], optional): List of positions to include in the plot. Defaults to None, 
+                                                which includes all positions.
+            color_channels (str or [str], optional): List of color channels to include in the plot. Defaults to None, 
+                                                    which includes all color channels.
+            group_by (str, optional): Metadata column name to group data by for aggregation. If specified, 
+                                    positions are ignored.
+            flip_grouping (bool, optional): If True, flips the grouping of the data. Defaults to False.
+            outfile (str, optional): The name of the output file for the animation. Defaults to 'xy_animation'.
+            xlim (tuple, optional): The limits for the x-axis. Defaults to None.
+            ylim (tuple, optional): The limits for the y-axis. Defaults to None.
+        """
+        if positions is not None and group_by is not None:
+            print("can not select groups and positions, ignoring positions selection for plot")    
+        if positions is None:
+            positions = self.positions
+        if color_channels is None:
+            color_channels = self.color_channels
+        x_column = self._save_select(x_column)
+        color_channels = self._save_select(color_channels)
+        positions = self._save_select(positions)
+        
+        if group_by is not None:
+            pdat = self.get_aggregate_data(group_by, 
+                                        color_channels)
+        else:
+            pdat = self.get_data(positions, color_channels)
+        if flip_grouping:
+            pdat = self._flip_dict(pdat)
+        
+        scores = {}
+        for c in x_column:
+            scores[c] = {}
             for k, v in pdat.items():
-                plot_xy_correlation(v,
-                                    x_column, 
-                                    y_column,
-                                    title = f"xy correlation of position data {k}")
+                time_values = collect_unique_column_values(v, frame_column)
+                x_min, x_max, y_min, y_max = compute_global_axes(v,c, y_column)
+                if xlim is None:
+                    xlim_p = (x_min, x_max)
+                else:
+                    xlim_p = xlim
+                if ylim is None:
+                    ylim_p = (y_min, y_max)
+                else:
+                    ylim_p = ylim
+                scores[c] [k] = {}
+                temp_dir = f"{c}_xy_correlation_movie_{k}"
+                os.makedirs(temp_dir, exist_ok=True)
+                frames = []
+                for f in time_values:
+                    print(f"Creating {frame_column} {f} for metric {c} and group {k}")
+                    frame_file = os.path.join(temp_dir, f'{c}_{frame_column}_{f}.png')
+                    v_c = v.copy()
+                    for k2, _ in v_c.items():
+                        v_c[k2],_ = filter_by_column(v_c[k2],column = frame_column,max_value= f, min_value = f)
+                    try:
+                        fig, scores[c][k][f] = plot_xy_correlation_stacked(v_c,
+                                            c, 
+                                            y_column,
+                                            title = f"xy correlations for {k} at {frame_column} {f}",
+                                            xlim = xlim_p,
+                                            ylim = ylim_p)
+                        fig.savefig(frame_file)
+                        frames.append(imageio.imread(frame_file))
+                        plt.close(fig)
+                    except Exception as e:
+                        print(f"Failed to generate plot for {f}: {e}")
+
+                            
+                imageio.mimsave(f"{outfile}_{y_column}_{c}_{k}.gif", frames, fps=2)
+                shutil.rmtree(temp_dir)
+        
+        
+        #restructure scores to be a dataframe    
+        df = pd.DataFrame(columns=["time","slope","intercept","r2","group1","group2","metric"])
+        for a, b in scores.items():
+            for k,v in b.items():
+                for k2, v2 in v.items():
+                    for k3, v3 in v2.items():
+                        row = pd.DataFrame([{"time": k2, 
+                                            "slope": v3["slope"], 
+                                            "intercept": v3["intercept"], 
+                                            "r2": v3["r2"], 
+                                            "group1": k,
+                                            "group2": k3,
+                                            "metric": a}])   
+                        df = pd.concat([df,row], ignore_index=True) 
+            
+        xy_slope_rate_plot(df, 
+                           row = "metric", 
+                           col = "group1", 
+                           hue = "group2",
+                           value_legend= f"Slope of {y_column}",
+                           time_legend=frame_column)
+        return df
 
     def plot_life_cycle_histograms(self, 
                                     columns: Union[str, List[str]], 

@@ -2,3 +2,5 @@
 *.egg-info
 *.pytest_cache
 data/
+xy_animation*
+.DS_store
