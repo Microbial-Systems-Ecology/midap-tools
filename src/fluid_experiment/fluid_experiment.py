@@ -58,6 +58,7 @@ class FluidExperiment:
         fuse(other): Fuses the current `FluidExperiment` with another `FluidExperiment`.
         rename_color_channel(...): Renames a color channel in the experiment data.
         rename_position(...): Renames a position in the experiment data.
+        rename_data_column(...): Renames a data column in the experiment data.
         add_bin_data(...): Adds descriptions of bins to each sample to the experiment data.
         calculate_growth_rate(...): Calculates growth rates for the experiment data.
         calculate_local_neighborhood(...): Calculates local neighborhood densities for the data.
@@ -65,6 +66,7 @@ class FluidExperiment:
         plot_qc_histograms(...): Plots QC histograms for selected samples / groups.
         plot_qc(...): Plots QC scatter plots for selected samples and shows linear fit / R^2 (data vs frame within trackID).
         plot_xy_correlation(...): Plots XY correlation for selected columns within samples / groups.
+        plot_xy_correlation_over_time(...): Plots XY correlations over time (gif + plot) for selected columns within samples / groups.
         plot_life_cycle_histograms(...): Plots histograms for life cycle data (histogram of trackID existence length).
         plot_rates(...): Plots rates (i.e growth rate) over time for the experiment.
         plot_selected_frame(...): Plots a selected frame from the experiment data (segmentation maps with color by channel).
@@ -986,7 +988,9 @@ class FluidExperiment:
                             xlim: Tuple = None,
                             ylim: Tuple = None):
         """
-        Plots a scatter plot of two specified columns for selected samples.
+        Plots a scatter plot of two specified columns over time for selected samples.
+        This function creates animated GIFs showing the correlation between the two columns over time.
+        The animation is saved as a GIF files. In addition a final overview plot is generated that shows the slope of the correlation over time for overlayed groups/channels.
         Args:
             x_column (str or [str]): The column(s) to be plotted on the x-axis. note, for each column separate animations will be created
             y_column (str): The column to be plotted on the y-axis.
@@ -996,10 +1000,10 @@ class FluidExperiment:
                                                     which includes all color channels.
             group_by (str, optional): Metadata column name to group data by for aggregation. If specified, 
                                     positions are ignored.
-            flip_grouping (bool, optional): If True, flips the grouping of the data. Defaults to False.
-            outfile (str, optional): The name of the output file for the animation. Defaults to 'xy_animation'.
-            xlim (tuple, optional): The limits for the x-axis. Defaults to None.
-            ylim (tuple, optional): The limits for the y-axis. Defaults to None.
+            flip_grouping (bool, optional): If True, flips the grouping of the data (color_channels and groups / positions). Defaults to False.
+            outfile (str, optional): The basename of the output file for the animation. Defaults to 'xy_animation'.
+            xlim (tuple, optional): The limits for the x-axis. Defaults to None = consistent limits across all timepoints will be determined automatically.
+            ylim (tuple, optional): The limits for the y-axis. Defaults to None = consistent limits across all timepoints will be determined automatically.
         """
         if positions is not None and group_by is not None:
             print("can not select groups and positions, ignoring positions selection for plot")    
