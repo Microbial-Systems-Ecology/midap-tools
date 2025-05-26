@@ -13,6 +13,7 @@ def get_requirements():
         "pytest",
         "scikit-learn",
         "plotnine",
+        "seaborn",
         "imageio"
     ]
 
