@@ -730,6 +730,30 @@ class FluidExperiment:
                 for bin_name, bin_values in bin_data.items():
                     # Assign the bin name to the rows that match the bin values
                     self.data[p][c].loc[self.data[p][c]['frame'].isin(bin_values), bin_column_name] = bin_name
+        self._update_information()
+
+    def add_bin_data_from_data(self, bin_data: dict, data_column: str, bin_column_name = "data_binned"):
+        """creates bins from a specified data column form a dictionary with range instructions
+
+        Args:
+            bin_data (dict): dictionary with keys bin names, and tuple (lower[float], upper[float]) defining the range. will be applied to each dataframe (all positions and color channels)
+            data_column (str): the column name of the data to be used to bin with
+            bin_column_name (str, optional): Column name that desrcibes the newly created bins. Defaults to "data_binned".
+
+
+        Returns:
+            None: in place adds a column to each dataframe to keep track of the bin
+        """
+        print(f"Adding bin data to all positions and color channels based on {data_column}")
+        for p in self.positions:
+            for c in self.color_channels:
+                print(f"Adding bin data to position {p} and color channel {c}")
+                # Create a new column with the bin data
+                self.data[p][c][bin_column_name] = None
+                for bin_name, (lower, upper) in bin_data.items():
+                    # Assign the bin name to the rows that match the bin values
+                    self.data[p][c].loc[(self.data[p][c][data_column] >= lower) & (self.data[p][c][data_column] < upper), bin_column_name] = bin_name
+        self._update_information()
         
 # ==========================================================    
 # ==================== CALCULATION METHODS =================

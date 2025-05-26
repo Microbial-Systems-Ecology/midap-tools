@@ -18,7 +18,6 @@ def calculate_growth_rate(df: pd.DataFrame,
         value_column (str): column representing the metric to track (e.g., "area")
         frame_column (str): column representing frame index. Defaults to "frame"
         growth_rate_column (str): name for the new growth rate column. Defaults to "growth_rate"
-        r_squared_column (str): name for the new R-squared column. Defaults to "growth_rsquared"
 
     Returns:
         pd.DataFrame: dataframe with growth rate and R-squared columns added

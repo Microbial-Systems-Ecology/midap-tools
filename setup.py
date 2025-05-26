@@ -12,7 +12,8 @@ def get_requirements():
         "statsmodels",
         "pytest",
         "scikit-learn",
-        "plotnine"
+        "plotnine",
+        "imageio"
     ]
 
 setup(
