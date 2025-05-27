@@ -53,13 +53,15 @@ class FluidExperiment:
         filter_data(column, ...): Filters data based on specified criteria (min occurence, min / max values etc).
         drop_positions(positions): Removes specified positions from the experiment.
         drop_color_channels(color_channels): Removes specified color channels from the experiment.
+        drop_data_column(data_columns): Removes specified data columns from all dataframes in the experiment.
         create_metadata_template(path, overwrite): Creates and exports a metadata template as a CSV file.
         load_metadata_template(path): Loads metadata from a CSV file.
         fuse(other): Fuses the current `FluidExperiment` with another `FluidExperiment`.
         rename_color_channel(...): Renames a color channel in the experiment data.
         rename_position(...): Renames a position in the experiment data.
         rename_data_column(...): Renames a data column in the experiment data.
-        add_bin_data(...): Adds descriptions of bins to each sample to the experiment data.
+        add_bin_data(...): Adds descriptions of bins to each sample to the experiment data (based on selected frames or frame ranges).
+        add_bin_data_from_data(...): Adds bin data to the experiment data based on value ranges of other data columns (i.e area).
         calculate_growth_rate(...): Calculates growth rates for the experiment data.
         calculate_local_neighborhood(...): Calculates local neighborhood densities for the data.
         calculate_transform_data(...): Adds transformed versions of specified columns to the data.
@@ -267,7 +269,8 @@ class FluidExperiment:
 # DUNDER METHODS
 
     def __str__(self):
-        info = (f"FluidExperiment with path: {self.path}\n" +
+        info = (f"FluidExperiment with name: {self.name}\n" +
+            f"Path: {self.path}\n" +
             f"{len(self.positions)} positions: {', '.join(map(str, self.positions))}\n" +
             f"{len(self.color_channels)} color channels: {', '.join(map(str, self.color_channels))}\n")
         
@@ -438,6 +441,7 @@ class FluidExperiment:
                     flipped_dict[inner_key] = {}
                 flipped_dict[inner_key][outer_key] = value
         return flipped_dict
+
 # ==========================================================    
 # ==================== MUTATION METHODS ====================
 # ==========================================================
@@ -528,6 +532,25 @@ class FluidExperiment:
                 print(f"Dropping color_channel {c} from position {p} in experiment")
                 self.data[p].pop(c)
                 self.filter_history[p].pop(c)
+        self._update_information()
+
+    def drop_data_column(self, data_columns: Union[str,List[str]]):
+        """        Removes specified data columns from all dataframes in the experiment.
+        
+        Args: 
+            data_columns (str or [str]): The data columns to remove from the experiment.
+        Returns:
+            None: The function updates the data in place by removing the specified columns.
+        """
+        data_columns = self._save_select(data_columns)
+        for p in self.positions:
+            for c in self.color_channels:
+                print(f"Dropping data columns {data_columns} from position {p} and color channel {c}")
+                for col in data_columns:
+                    if col in self.data[p][c].columns:
+                        self.data[p][c].drop(columns=col, inplace=True)
+                    else:
+                        print(f"Warning: Column '{col}' not found in position {p}, color channel {c}. Skipping.")
         self._update_information()
 
     def create_metadata_template(self, path = None, overwrite = False):
@@ -711,7 +734,9 @@ class FluidExperiment:
                     self.data[p][c][new_name] = self.data[p][c].pop(original_name)
         self._update_information()                   
     
-    def add_bin_data(self, bin_data: dict, bin_column_name = "bins",):
+    def add_bin_data(self, 
+                     bin_data: dict, 
+                     bin_column_name: str = "bins",):
         """adds bin data to the experiment. bins are supplied as dictionary with integer lists
         
         Args:
@@ -732,8 +757,11 @@ class FluidExperiment:
                     self.data[p][c].loc[self.data[p][c]['frame'].isin(bin_values), bin_column_name] = bin_name
         self._update_information()
 
-    def add_bin_data_from_data(self, bin_data: dict, data_column: str, bin_column_name = "data_binned"):
-        """creates bins from a specified data column form a dictionary with range instructions
+    def add_bin_data_from_data(self, 
+                               bin_data: dict, 
+                               data_column: str, 
+                               bin_column_name: str = "data_binned"):
+        """creates bins from a specified data column and a dictionary with range instructions
 
         Args:
             bin_data (dict): dictionary with keys bin names, and tuple (lower[float], upper[float]) defining the range. will be applied to each dataframe (all positions and color channels)

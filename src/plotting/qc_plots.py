@@ -304,8 +304,9 @@ def plot_xy_correlation_stacked(
 def plot_spatial_maps(array_dict: dict,
                       df_dict: dict,
                       property: str,
-                      frame_number=0,
-                      title = None):
+                      frame_number: int = 0,
+                      title: str = None,
+                      silent: bool = True):
     """
     Plots spatial maps of cell property. Adapted from code received from Simon van Vilet
     
@@ -313,8 +314,9 @@ def plot_spatial_maps(array_dict: dict,
         label_stack (dict np.ndarray):  Numpy ND array [t,y,x] with label image stack
         df (dict of pd.Dataframe): pandas data frame of lineage object
         property (str): key of cell property contained in lineage object
-        frame_number (int): frame number to show, incase of 3D label stack
+        frame_number (int, optional): frame number to show, incase of 3D label stack, defaults to 0
         title (str, optional): title of the plot, defaults to None
+        silent: (bool, optional): if True, suppresses warnings about missing cells in the frame, defaults to True
         
     Returns:
         creates a matplotlib figure with spatial maps of cell property at given frame
@@ -340,8 +342,9 @@ def plot_spatial_maps(array_dict: dict,
             else:
                 try:
                     spatial_map[labels == cnb] = df.loc[(df['frame'] == frame_number) & (df['trackID'] == cnb), property].item()
-                except:
-                    print(f"skipping cell {cnb} in frame {frame_number}")
+                except Exception:
+                    if not silent:
+                        print(f"skipping cell {cnb} in frame {frame_number}")
         axs[i].imshow(spatial_map, cmap=colMap)
         axs[i].set_title(k) 
     plt.suptitle(title or f'Spatial Maps of {property} at Frame {frame_number}')   
