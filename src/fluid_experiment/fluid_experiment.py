@@ -1386,6 +1386,14 @@ class FluidExperiment:
                         summary['column'] = col
                         row_data = pd.DataFrame.from_dict({f"{p}_{c}_{col}": summary}, orient='index')
                         report = pd.concat([report,row_data])
+                        
+        if self.metadata is not None:
+            metadata = self.metadata.copy()
+            metadata = metadata.reset_index(drop=True)
+            report = report.merge(metadata, on="position", how="left")
+            
+
+        
         return report
                     
     def plot_data_summary(self,
@@ -1417,8 +1425,6 @@ class FluidExperiment:
             raise AttributeError("Experiment does not have any metadata, use load_metadata_template first")
         if group_by is not None and group_by not in self.metadata.columns:
             raise ValueError(f"Column '{group_by}' not found in metadata.")
-        if group_by is not None:
-            data = data.merge(self.metadata[[group_by]], left_on = "position", right_index = True)
         
         if use_bins and group_by is not None:
             p1 = summary_plot(data,value_column="mean", group_column=group_by, bins_column= bin_column_name, subsetting1= "column", subsetting2="color_channel") 
