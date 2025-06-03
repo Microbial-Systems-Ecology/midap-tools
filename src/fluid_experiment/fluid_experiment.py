@@ -669,6 +669,7 @@ class FluidExperiment:
         
         for p in self.positions:
             self.data[p][new_name] = self.data[p].pop(old_name)
+            self.filter_history[p][new_name] = self.filter_history[p].pop(old_name)
         self.color_channels.remove(old_name)
         self.color_channels.append(new_name)
        
