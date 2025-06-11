@@ -10,3 +10,5 @@ This folder contains jupyter notebook files with an interactive guide for midap-
 -   Chapter 05: Growth analyses
 -   Chapter 06: Local neighborhood analyses
 -   Chapter 07: Power user options (using your own functions for calculations)
+
+In addition, you will also find an excercise folder. For each chapter you will find an exercise in the folder, with a corresponding solution

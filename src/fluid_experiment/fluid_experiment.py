@@ -1440,21 +1440,24 @@ class FluidExperiment:
 # ==========================================================    
 # ==================== EXPORT METHODS ======================
 # ==========================================================            
-
+        
     def get_data(self, 
-        positions: Union[str, List[str]] = None, 
-        color_channels: Union[str, List[str]] = None,
-        frames: List[int] = None,
-        ) -> dict:
+            positions: Union[str, List[str]] = None, 
+            color_channels: Union[str, List[str]] = None,
+            frames: List[int] = None,
+            add_metadata: bool = False,
+            ) -> dict:
         """
         Retrieve data from nested dictionary structure based on position and color_channel.
         
         Args:
-            positions (str or [str], optional): Single or multiple position keys. Defaults to None = take all positions
-            color_channels (str or [str], optional): Single or multiple color_channel keys. Defaults to None = take all color_channels
+            positions (str or [str], optional): Single or multiple position keys. Defaults to None = take all positions.
+            color_channels (str or [str], optional): Single or multiple color_channel keys. Defaults to None = take all color_channels.
+            frames (List[int], optional): List of frame numbers to filter on. Defaults to None.
+            add_metadata (bool, optional): Whether to add metadata columns from self.metadata to each DataFrame. Defaults to False.
         
         Returns:
-            dict: the nested results dictionary {"position": {"color_channel": pd.DataFrame}}.
+            dict: Nested dictionary {"position": {"color_channel": pd.DataFrame}}.
         """
         if positions is None:
             positions = self.positions
@@ -1463,24 +1466,32 @@ class FluidExperiment:
         positions = self._save_select(positions)
         color_channels = self._save_select(color_channels)
         
-        export = {
-            pos: {
-                ch: self.data[pos][ch].copy()
-                for ch in color_channels
-            }
-            for pos in positions
-        }
-        
-        if frames is not None:
-            for pos in positions:
-                for ch in color_channels:
-                    export[pos][ch] = export[pos][ch].loc[export[pos][ch]['frame'].isin(frames)]
-        
+        export = {}
+
+        for pos in positions:
+            export[pos] = {}
+            for ch in color_channels:
+                df = self.data[pos][ch].copy()
+
+                if frames is not None:
+                    df = df[df['frame'].isin(frames)]
+
+                if add_metadata:
+                    if self.metadata is None:
+                        raise AttributeError("Experiment does not have any metadata, use load_metadata_template first")
+                    # Assuming self.metadata is a DataFrame with position as index or has a row per position
+                    metadata_row = self.metadata.loc[pos]
+                    for col, val in metadata_row.items():
+                        df[col] = val
+
+                export[pos][ch] = df
+
         return export
         
     def get_aggregate_data(self, 
                            column: str, 
-                           color_channels: Union[str, List[str]] = None) -> dict:
+                           color_channels: Union[str, List[str]] = None,
+                           add_metadata: bool = False,) -> dict:
         """
         Aggregates tracking data across groups defined by a metadata column.
         Groups positions using a specified column from the loaded metadata, then fuses tracking data 
@@ -1510,10 +1521,11 @@ class FluidExperiment:
             .to_dict()
         )
         agg_dat = {}
+        data = self.get_data(add_metadata = add_metadata)
         for k, v in grouped_positions.items():
             agg_dat[k] = {}
             for c in color_channels:
-                dat = [self.data[i][c] for i in v]
+                dat = [data[i][c] for i in v]
                 agg_dat[k][c] = fuse_track_output(dat)     
         return agg_dat
 
