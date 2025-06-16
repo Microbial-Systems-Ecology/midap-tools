@@ -872,7 +872,7 @@ class FluidExperiment:
                                                mask, 
                                                neighborhood_prefix,
                                                distance_threshold, 
-                                               include_empty
+                                               include_empty,
                                                **custom_kwargs)
         self._update_information()
  
@@ -909,6 +909,22 @@ class FluidExperiment:
                         case "inverse":
                             self.data[p][c][column + postfix] = np.reciprocal(self.data[p][c][column])
         self._update_information()            
+
+    def calculate_dataframe_operation(self,custom_function: Callable, **custom_kwargs):
+        """
+        Applies a custom function to each data column of all positions and color channels.
+        This method allows for flexible data manipulation by applying a user-defined function to each pandas dataframe.
+        Args:
+            custom_function (function): A function that takes a pandas Dataframe and returns a modified pandas Dataframe.
+                                        This function should accept the Dataframe as its first argument and any additional keyword arguments.
+            **custom_kwargs: Additional keyword arguments to be passed to the custom function.
+        Returns:
+            None: The function updates the data in place by applying the custom function to each position and color channel.
+        """
+        for p in self.positions:
+            for c in self.color_channels:
+                self.data[p][c] = custom_function(self.data[p][c], **custom_kwargs)
+        self._update_information()
 
 # ==========================================================    
 # ==================== PLOTTING / REPORTING METHODS ========
