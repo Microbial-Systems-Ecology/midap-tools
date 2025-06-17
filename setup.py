@@ -19,7 +19,7 @@ def get_requirements():
 
 setup(
     name="midap-tools",
-    version="0.0.1",
+    version="1.0.0",
     description="A post processing package for midap data.",
     long_description=(
         "# MIDAP-tools: A post processing package for midap data\n\n"
