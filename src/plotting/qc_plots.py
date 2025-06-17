@@ -309,44 +309,49 @@ def plot_spatial_maps(array_dict: dict,
                       silent: bool = True):
     """
     Plots spatial maps of cell property. Adapted from code received from Simon van Vilet
-    
+
     Parameters:
-        label_stack (dict np.ndarray):  Numpy ND array [t,y,x] with label image stack
-        df (dict of pd.Dataframe): pandas data frame of lineage object
+        array_dict (dict np.ndarray):  Numpy ND array [t,y,x] with label image stack
+        df_dict (dict of pd.DataFrame): pandas data frame of lineage object
         property (str): key of cell property contained in lineage object
-        frame_number (int, optional): frame number to show, incase of 3D label stack, defaults to 0
+        frame_number (int, optional): frame number to show, in case of 3D label stack, defaults to 0
         title (str, optional): title of the plot, defaults to None
-        silent: (bool, optional): if True, suppresses warnings about missing cells in the frame, defaults to True
-        
+        silent (bool, optional): if True, suppresses warnings about missing cells in the frame, defaults to True
+
     Returns:
-        creates a matplotlib figure with spatial maps of cell property at given frame
+        Creates a matplotlib figure with spatial maps of cell property at given frame and a colorbar
     """
-    colMap = matplotlib.colormaps["viridis"].copy() 
+    colMap = matplotlib.colormaps["viridis"].copy()
     colMap.set_bad(color='black')
     n_col = len(df_dict)
-    fig, axs = plt.subplots(1, n_col, figsize=(n_col * 5, 5))
+
+    fig, axs = plt.subplots(1, n_col, figsize=(n_col * 5, 5), constrained_layout=True)
     if n_col == 1:
         axs = [axs]
 
-    
-    for i, items in enumerate(zip(df_dict.keys(), array_dict.values() , df_dict.values())):
-        k , label_stack, df = items
+    im = None  # to store the image handle for colorbar reference
+
+    for i, (k, label_stack, df) in enumerate(zip(df_dict.keys(), array_dict.values(), df_dict.values())):
         labels = label_stack[frame_number, :, :]
         spatial_map = np.full(labels.shape, np.nan)
-        
-        # Go over cells in selected frame:
+
         for cnb in np.unique(labels):
             if cnb == 0:
                 continue
-            # assign cells mask area the phenotype of choice
-            else:
-                try:
-                    spatial_map[labels == cnb] = df.loc[(df['frame'] == frame_number) & (df['trackID'] == cnb), property].item()
-                except Exception:
-                    if not silent:
-                        print(f"skipping cell {cnb} in frame {frame_number}")
-        axs[i].imshow(spatial_map, cmap=colMap)
-        axs[i].set_title(k) 
-    plt.suptitle(title or f'Spatial Maps of {property} at Frame {frame_number}')   
-    plt.show()
+            try:
+                spatial_map[labels == cnb] = df.loc[
+                    (df['frame'] == frame_number) & (df['trackID'] == cnb), property
+                ].item()
+            except Exception:
+                if not silent:
+                    print(f"skipping cell {cnb} in frame {frame_number}")
 
+        im = axs[i].imshow(spatial_map, cmap=colMap)
+        axs[i].set_title(k)
+
+    # Add a colorbar to the right of the plot grid
+    if im:
+        cbar = fig.colorbar(im, ax=axs, location='right', shrink=0.8, label=property)
+
+    fig.suptitle(title or f'Spatial Maps of {property} at Frame {frame_number}')
+    plt.show()
