@@ -793,7 +793,8 @@ class FluidExperiment:
                               id_column: str, 
                               value_column: str, 
                               frame_column: str = "frame",
-                              growth_rate_column: str = "growth_rate", 
+                              growth_rate_column: str = "growth_rate",
+                              centric: bool = False, 
                               custom_method: Callable = None, 
                               **custom_kwargs):
         """
@@ -820,6 +821,7 @@ class FluidExperiment:
                                                             value_column,
                                                             frame_column,
                                                             growth_rate_column,
+                                                            centric,
                                                             **custom_kwargs)
                 else:    
                     # Default midap-tools method
@@ -828,7 +830,8 @@ class FluidExperiment:
                                                             id_column, 
                                                             value_column,
                                                             frame_column,
-                                                            growth_rate_column)
+                                                            growth_rate_column,
+                                                            centric)
         self._update_information()
    
     def calculate_local_neighborhood(self, 
