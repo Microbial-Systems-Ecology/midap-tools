@@ -85,13 +85,18 @@ def plot_frame_cv2_jupyter_dict(array_dict,
                                 frame_index=0, 
                                 colors=None, 
                                 figsize=(8, 8), 
-                                title = None):
+                                title=None,
+                                show_distance: int = None):
     """
     Displays overlay of boolean masks from a dict of 3D arrays (Jupyter-friendly).
-    
-    array_dict: dict with keys as names and values as 3D boolean numpy arrays
-    frame_index: index along axis 0 to extract 2D slices
-    colors: optional list of BGR tuples
+
+    Args:
+        array_dict: dict with keys as names and values as 3D boolean numpy arrays
+        frame_index: index along axis 0 to extract 2D slices
+        colors: optional list of BGR tuples
+        figsize: size of the figure in inches
+        title: plot title
+        show_distance: if set, a red circle with this px radius is drawn in the center
     """
     if not array_dict:
         raise ValueError("Input dictionary is empty.")
@@ -132,6 +137,12 @@ def plot_frame_cv2_jupyter_dict(array_dict,
 
         rgb_color = (color[2]/255, color[1]/255, color[0]/255)
         legend_patches.append(Patch(color=rgb_color, label=name))
+
+    # Draw center circle if requested
+    if show_distance is not None and show_distance > 0:
+        center_y = shape[0] // 2
+        center_x = shape[1] // 2
+        cv2.circle(overlay, (center_x, center_y), show_distance, (0, 0, 255), thickness=3)  # Red circle
 
     # Convert BGR to RGB for display
     overlay_rgb = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)

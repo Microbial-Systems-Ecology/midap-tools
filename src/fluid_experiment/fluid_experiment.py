@@ -807,6 +807,7 @@ class FluidExperiment:
             frame_column (str): column representing frame index. Defaults to "frame"
             growth_rate_column (str): name for the new growth rate column. Defaults to "growth_rate"
             r_squared_column (str): name for the new R-squared column. Defaults to "growth_rsquared"
+            centric (bool): should growth rate be calculated centered on each frame (i.e past and future data), defaults to False = only future data
             custom_method (function): custom method to be used for calculation. defaults to = None
             **custom_kwargs : additional arguments the custom function may take
         """
@@ -1253,7 +1254,9 @@ class FluidExperiment:
                              frame: int, 
                              positions: Union[str, List[str]] = None, 
                              color_channels: Union[str, List[str]] = None, 
-                             color: List[Tuple[int, int, int]] = None):
+                             color: List[Tuple[int, int, int]] = None,
+                             show_distance = None,
+                             ):
         """
         Plots a selected frame from the experiment data with optional filtering by positions and color channels.
         This method overlays segmentation data for the specified frame from each selected color channel
@@ -1267,6 +1270,7 @@ class FluidExperiment:
                 If None, all loaded color channels are used. Defaults to None.
             color ([(int,int,int)], optional): List of RGB color tuples (value range 0 to 255) to use for visualizing each channel.
                 If None, default color mappings are used by the plotting function. Defaults to None. needs to be of length(color_channels)
+            show_distance (int): if set, a red circle with this px radius is drawn in the center. defaults to None = no circle
         """
         if color_channels is None:
             color_channels = self.color_channels   
@@ -1280,7 +1284,7 @@ class FluidExperiment:
             array = {}
             for c in color_channels:
                 array[c] = load_segmentations_h5(os.path.join(self.path, p),c)
-            plot_frame_cv2_jupyter_dict(array,frame, color, title = f"{p}: Overlay of Channels")
+            plot_frame_cv2_jupyter_dict(array,frame, color, title = f"{p}: Overlay of Channels", show_distance = show_distance)
  
     def plot_spatial_maps(self,
                                        frame: int,
