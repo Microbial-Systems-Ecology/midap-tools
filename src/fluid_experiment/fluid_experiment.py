@@ -7,6 +7,7 @@ import imageio
 import shutil
 from IPython.display import display
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from collections import OrderedDict
 from typing import Union, List, Callable, Tuple
 from fluid_experiment.utilities import (
@@ -1286,6 +1287,42 @@ class FluidExperiment:
                 array[c] = load_segmentations_h5(os.path.join(self.path, p),c)
             plot_frame_cv2_jupyter_dict(array,frame, color, title = f"{p}: Overlay of Channels", show_distance = show_distance)
  
+    def render_frame_gif(self, 
+                                outfile_prefix: str = "selected_frames", 
+                                show_distance: int = None,
+                                positions: Union[str, List[str]] = None, 
+                                color_channels: Union[str, List[str]] = None):
+        """
+        Creates a GIF animation for each position showing overlayed segmentation maps across all frames.
+
+        Args:
+            outfile_prefix (str): Prefix for output GIF filenames (e.g., 'selected_frames_positionX.gif').
+            show_distance (int): Radius of red circle to draw at center (in px), optional.
+            positions (str or list): Positions to include. Defaults to all.
+            color_channels (str or list): Color channels to include. Defaults to all.
+        """
+        if color_channels is None:
+            color_channels = self.color_channels
+        if positions is None:
+            positions = self.positions
+        color_channels = self._save_select(color_channels)
+        positions = self._save_select(positions)
+
+        for p in positions:
+            print(f"Generating segmentation GIF for position: {p}")
+            array = {c: load_segmentations_h5(os.path.join(self.path, p), c) for c in color_channels}
+            images = []
+            for f in range(self.n_frames + 1):
+                fig = plot_frame_cv2_jupyter_dict(array, frame_index=f, title=f"{p}: Frame {f}", show_distance=show_distance, show=False)
+                canvas = FigureCanvas(fig)
+                canvas.draw()
+                image = np.frombuffer(canvas.buffer_rgba(), dtype='uint8')
+                image = image.reshape(canvas.get_width_height()[::-1] + (4,))[:, :, :3]  # Strip alpha
+                images.append(image)
+                plt.close(fig)
+            output_path = f"{outfile_prefix}_{p}.gif"
+            imageio.mimsave(output_path, images, fps=2)
+
     def plot_spatial_maps(self,
                                        frame: int,
                                        property_column: str,
@@ -1324,6 +1361,50 @@ class FluidExperiment:
                               property = property_column, 
                               frame_number= frame,
                               title= f"{p}: spatial map of {property_column} at frame {frame}",)
+ 
+    def render_spatial_maps_gif(self, 
+                                property_column: str,
+                                outfile_prefix: str = "spatial_maps",
+                                positions: Union[str, List[str]] = None,
+                                color_channels: Union[str, List[str]] = None):
+        """
+        Creates a GIF animation for each position showing spatial maps (segmentation colored by attribute) across all frames.
+
+        Args:
+            property_column (str): Data column to color by (must exist in tracking data).
+            outfile_prefix (str): Prefix for output GIF filenames (e.g., 'spatial_maps_pos1.gif').
+            positions (str or list): Positions to include. Defaults to all.
+            color_channels (str or list): Channels to include. Defaults to all.
+        """
+        from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+
+        if color_channels is None:
+            color_channels = self.color_channels
+        if positions is None:
+            positions = self.positions
+        color_channels = self._save_select(color_channels)
+        positions = self._save_select(positions)
+
+        for p in positions:
+            print(f"Generating spatial map GIF for position: {p}")
+            seg = {c: load_tracking_h5(os.path.join(self.path, p), c) for c in color_channels}
+            data = self.get_data([p], color_channels)
+            images = []
+            for f in range(self.n_frames + 1):
+                fig = plot_spatial_maps(seg, 
+                                        data[p], 
+                                        property=property_column, 
+                                        frame_number=f,
+                                        title=f"{p}: {property_column} at Frame {f}",
+                                        show=False)
+                canvas = FigureCanvas(fig)
+                canvas.draw()
+                image = np.frombuffer(canvas.buffer_rgba(), dtype='uint8')
+                image = image.reshape(canvas.get_width_height()[::-1] + (4,))[:, :, :3]
+                images.append(image)
+                plt.close(fig)
+            output_path = f"{outfile_prefix}_{p}.gif"
+            imageio.mimsave(output_path, images, fps=2)
  
     def report_filter_history(self):
         """
