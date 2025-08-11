@@ -22,8 +22,9 @@ from plotting.qc_plots import plot_qc_xy_correlation, plot_frame_cv2_jupyter_dic
 from plotting.result_plots import summary_plot
 from report.data_summary import data_summary
 from mutate.fuse import fuse_track_output
-from mutate.filter import filter_by_column
-from mutate.load import load_tracking_data, load_segmentations_h5, load_tracking_h5
+from mutate.filter import filter_by_column, filter_by_segment_shape_parallel
+from mutate.load import load_tracking_data, load_segmentations_h5, load_tracking_h5, save_segmentations_h5, save_tracking_data
+from mutate.combine_channels import multichannel_set_operations
 
 class FluidExperiment:
     """
@@ -513,6 +514,34 @@ class FluidExperiment:
                 self.filter_history[p][g].append(summary)
         self._update_information()
         
+    def filter_segment_shape(self,
+                             positions: Union[str, List[str]] = None, 
+                             color_channels: Union[str, List[str]] = None,
+                             smoothness = 0.8):
+        """        Filters the data based on the shape of the segmentation masks for specified positions and color channels.
+        This method applies a shape filter to the segmentation masks, smoothing them based on the specified smoothness parameter.
+        Args:
+            positions (str or [str], optional): The positions to filter. If None, filters all positions in the experiment. Defaults to None.
+            color_channels (str or [str], optional): The color channels to filter. If None, filters all color channels in the experiment. Defaults to None.
+            smoothness (float, optional): The smoothness parameter for the shape filter. Defaults to 0.8.
+        """
+        if positions is None:
+            positions = self.positions
+        if color_channels is None:
+            color_channels = self.color_channels
+            
+        positions = self._save_select(positions)  
+        color_channels = self._save_select(color_channels)
+        
+        for p in positions:
+            for c in color_channels:
+                print(f"Filtering {p} {c} for with smoothness parameter {smoothness}")
+                mask = load_tracking_h5(self.file_paths[p],c)
+                self.data[p][c], summary = filter_by_segment_shape_parallel(self.data[p][c], mask, smoothness)
+                self.filter_history[p][c].append(summary)
+        
+        
+        
     def drop_positions(self, positions: Union[str,List[str]]):
         """
         Removes specified positions from the experiment.
@@ -591,9 +620,7 @@ class FluidExperiment:
             old_path = self.file_paths[p]
             pos_folder = os.path.basename(old_path.rstrip("/\\"))
             new_path = os.path.join(base_path, pos_folder)
-            self.file_paths[p] = new_path
-            
-        
+            self.file_paths[p] = new_path    
 
     def create_metadata_template(self, path = None, overwrite = False):
             """
@@ -830,6 +857,56 @@ class FluidExperiment:
                     # Assign the bin name to the rows that match the bin values
                     self.data[p][c].loc[(self.data[p][c][data_column] >= lower) & (self.data[p][c][data_column] < upper), bin_column_name] = bin_name
         self._update_information()
+    
+    def combine_channels(self,
+                         new_channel: str, 
+                         used_channels: List[str],
+                         mode = "difference",
+                         force_overwrite = False):
+        """ Combines multiple color channels into a new channel using specified operations.
+        This method allows you to create a new channel by applying set operations (e.g., union, intersection, difference)
+        on the specified used channels. The new channel is created for each position in the experiment.
+        Args:
+            new_channel (str): The name for the new channel to be created.
+            used_channels (List[str]): List of color channels to be used for the operation.
+            mode (str, optional): The operation to apply. Can be "union", "intersection", or "difference". Defaults to "difference".
+            force_overwrite (bool, optional): If True, overwrites existing data for the new channel. Defaults to False.
+        Raises:
+            KeyError: If the new channel name already exists in the experiment.
+            FileExistsError: If the new channel data already exists and force_overwrite is False.
+        Returns:
+            None: The function updates the experiment data with the new channel.
+        """
+        
+        print(f"Creating a new channel with name {new_channel} from operation {mode} applied in order to {used_channels}")
+        if new_channel in self.color_channels:
+            raise KeyError(f"The selected name for new channel {new_channel} already exists in experiment! Use a unique name")
+            
+        
+        for p in self.positions:
+            
+            if os.path.exists(os.path.join(self.file_paths[p],new_channel)) and not force_overwrite:
+                raise FileExistsError(f"Warning: data for channel with name {new_channel} already exists. use force_overwrite = True to forcefully overwrite with new data")
+            self.filter_history[p][new_channel] = []
+            
+            print(f"Calculate calculate new channel for position {p}")
+            masks = {}
+            data = self.get_data([p], used_channels)[p]
+            for c in used_channels:
+                masks[c] = load_tracking_h5(self.file_paths[p],c)
+                
+    
+            data_out, mask_out = multichannel_set_operations(data, masks, type = mode)
+            
+            #create path for new segment file
+            save_segmentations_h5(mask_out,self.file_paths[p],new_channel, binary= False)
+            save_segmentations_h5(mask_out,self.file_paths[p],new_channel, binary=True)
+            save_tracking_data(data_out,self.file_paths[p],new_channel)
+            self.data[p][new_channel] = data_out
+                        
+        self.color_channels.append(new_channel)
+                
+    
         
 # ==========================================================    
 # ==================== CALCULATION METHODS =================

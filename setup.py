@@ -12,6 +12,7 @@ def get_requirements():
         "statsmodels",
         "pytest",
         "scikit-learn",
+        "scikit-image"
         "plotnine",
         "seaborn",
         "imageio"
