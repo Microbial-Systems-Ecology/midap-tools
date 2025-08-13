@@ -466,12 +466,14 @@ class FluidExperiment:
 # ==========================================================
 
     def filter_data(self, 
-                      column: str, 
-                      min_occurences: int = 0, 
-                      min_value: float = None, 
-                      max_value: float = None, 
-                      custom_function: Callable = None, 
-                      **custom_kwargs):
+                    column: str, 
+                    min_occurences: int = 0, 
+                    min_value: float = None, 
+                    max_value: float = None, 
+                    positions: Union[str, List[str]] = None, 
+                    color_channels: Union[str, List[str]] = None,
+                    custom_function: Callable = None, 
+                    **custom_kwargs):
         """
         Filters a dataframe base on a specified track. supports two modes (or combined mode)
         if min_occurence > 0, filters out any row for which the unique value in the target column has less than min_occurence entries
@@ -488,13 +490,22 @@ class FluidExperiment:
         Returns:
             None: The function updates the data and filter history in place.
         """
+        if positions is None:
+            positions = self.positions
+        if color_channels is None:
+            color_channels = self.color_channels
+            
+        positions = self._save_select(positions)  
+        color_channels = self._save_select(color_channels)
+        
+        
         if min_occurences >= 0:
             print(f"Filtering out {column} with less than {min_occurences} occurences")
         if min_value is not None or max_value is not None:
             print(f"Filtering out {column} with min value {min_value} and max value {max_value}")
         
-        for p in self.positions:
-            for g in self.color_channels:
+        for p in positions:
+            for g in color_channels:
                 print(f"Filtering channel {g} at position {p}:")
                 if custom_function is not None:
                     # apply the custom function with optional additional kwargs
@@ -538,9 +549,7 @@ class FluidExperiment:
                 print(f"Filtering {p} {c} for with smoothness parameter {smoothness}")
                 mask = load_tracking_h5(self.file_paths[p],c)
                 self.data[p][c], summary = filter_by_segment_shape_parallel(self.data[p][c], mask, smoothness)
-                self.filter_history[p][c].append(summary)
-        
-        
+                self.filter_history[p][c].append(summary)    
         
     def drop_positions(self, positions: Union[str,List[str]]):
         """
@@ -862,7 +871,8 @@ class FluidExperiment:
                          new_channel: str, 
                          used_channels: List[str],
                          mode = "difference",
-                         force_overwrite = False):
+                         force_overwrite = False,
+                         radius: int = 0):
         """ Combines multiple color channels into a new channel using specified operations.
         This method allows you to create a new channel by applying set operations (e.g., union, intersection, difference)
         on the specified used channels. The new channel is created for each position in the experiment.
@@ -871,6 +881,7 @@ class FluidExperiment:
             used_channels (List[str]): List of color channels to be used for the operation.
             mode (str, optional): The operation to apply. Can be "union", "intersection", or "difference". Defaults to "difference".
             force_overwrite (bool, optional): If True, overwrites existing data for the new channel. Defaults to False.
+            radius (int): The radius (px) within which will be checked if there is an overlapp. Larger number may increase accuracy at the cost of performance
         Raises:
             KeyError: If the new channel name already exists in the experiment.
             FileExistsError: If the new channel data already exists and force_overwrite is False.
@@ -896,7 +907,7 @@ class FluidExperiment:
                 masks[c] = load_tracking_h5(self.file_paths[p],c)
                 
     
-            data_out, mask_out = multichannel_set_operations(data, masks, type = mode)
+            data_out, mask_out = multichannel_set_operations(data, masks, type = mode, radius= radius)
             
             #create path for new segment file
             save_segmentations_h5(mask_out,self.file_paths[p],new_channel, binary= False)
