@@ -7,6 +7,7 @@ import imageio
 import shutil
 from IPython.display import display
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from collections import OrderedDict
 from typing import Union, List, Callable, Tuple
 from fluid_experiment.utilities import (
@@ -21,8 +22,9 @@ from plotting.qc_plots import plot_qc_xy_correlation, plot_frame_cv2_jupyter_dic
 from plotting.result_plots import summary_plot
 from report.data_summary import data_summary
 from mutate.fuse import fuse_track_output
-from mutate.filter import filter_by_column
-from mutate.load import load_tracking_data, load_segmentations_h5, load_tracking_h5
+from mutate.filter import filter_by_column, filter_by_segment_shape_parallel
+from mutate.load import load_tracking_data, load_segmentations_h5, load_tracking_h5, save_segmentations_h5, save_tracking_data
+from mutate.combine_channels import multichannel_set_operations
 
 class FluidExperiment:
     """
@@ -60,6 +62,7 @@ class FluidExperiment:
         rename_color_channel(...): Renames a color channel in the experiment data.
         rename_position(...): Renames a position in the experiment data.
         rename_data_column(...): Renames a data column in the experiment data.
+        fix_base_path(...): Updates the file paths of the specified positions to a new base path.
         add_bin_data(...): Adds descriptions of bins to each sample to the experiment data (based on selected frames or frame ranges).
         add_bin_data_from_data(...): Adds bin data to the experiment data based on value ranges of other data columns (i.e area).
         calculate_growth_rate(...): Calculates growth rates for the experiment data.
@@ -73,7 +76,10 @@ class FluidExperiment:
         plot_rates(...): Plots rates (i.e growth rate) over time for the experiment.
         plot_selected_frame(...): Plots a selected frame from the experiment data (segmentation maps with color by channel).
         plot_spatial_maps(...): Plots spatial maps (cells colored by a selected attribute (i.e growth rate)) at a selected frame
+        render_frame_gif(...): Creates a GIF animation for each position showing overlayed segmentation maps across all frames.
+        render_spatial_maps_gif(...): Creates a GIF animation for each position showing spatial maps (segmentation colored by attribute) across all frames.
         report_filter_history(): Prints the filter history (with sequence of filters applied / filter rate etc) for each positions and color channel.
+        report_file_paths(): Prints the file paths for each position in the experiment.
         get_data(positions, color_channels): Retrieves data for specified positions and color channels.
         get_aggregate_data(column, color_channels): Aggregates data across groups defined by metadata.
         report_data_summary(...): exports the summary data of the experiment in a long data format, compatible with statistical packages(i.e average length/area with bin and sample)
@@ -141,7 +147,11 @@ class FluidExperiment:
         self.path = path
         
         if positions is None:
-            self.positions = [os.path.basename(f) for f in os.scandir(path) if f.is_dir()]
+            self.positions = [
+            os.path.basename(f.path)
+            for f in os.scandir(path)
+            if f.is_dir() and not f.name.startswith('.')
+        ]
             self.positions = sort_folder_names(self.positions)
         else:
             self.positions = self._save_select(positions)
@@ -154,10 +164,12 @@ class FluidExperiment:
         # Create data objects    
         self.data = {}
         self.filter_history = {}
+        self.file_paths = {}
         self.metadata = None
         self.name = name
         for p in self.positions:
             self.data[p] = {}
+            self.file_paths[p] = os.path.join(path,p)
             self.filter_history[p] = {}
             for g in self.color_channels:
                 print(f"Loading sample at position {p} for color channel {g}")
@@ -187,10 +199,9 @@ class FluidExperiment:
         new_instance.headers = copy.deepcopy(other.headers)
         new_instance.unequal_header = other.unequal_header
         new_instance.filter_history = copy.deepcopy(other.filter_history)
-        if other.metadata is not None:
-            new_instance.metadata = other.metadata.copy()
-        else:
-            new_instance.metadata = None
+        new_instance.file_paths = copy.deepcopy(other.file_paths)
+        new_instance.metadata = other.metadata.copy() if other.metadata is not None else None
+
         return new_instance
 
     @classmethod
@@ -262,6 +273,14 @@ class FluidExperiment:
                             history_group = channel_group[i]
                             history_entry = {key: history_group.attrs[key] for key in history_group.attrs}
                             instance.filter_history[p][c].append(history_entry)
+                            
+            #load file paths
+            instance.file_paths = {}
+            if 'file_paths' in h5file:
+                file_paths_group = h5file['file_paths']
+                for key in file_paths_group:
+                    instance.file_paths[key] = file_paths_group[key][()].decode('utf-8')
+                
 
         print(f"Successfully loaded experiment with data from {len(instance.positions)} positions and {len(instance.color_channels)} color channels")
         return instance
@@ -447,12 +466,14 @@ class FluidExperiment:
 # ==========================================================
 
     def filter_data(self, 
-                      column: str, 
-                      min_occurences: int = 0, 
-                      min_value: float = None, 
-                      max_value: float = None, 
-                      custom_function: Callable = None, 
-                      **custom_kwargs):
+                    column: str, 
+                    min_occurences: int = 0, 
+                    min_value: float = None, 
+                    max_value: float = None, 
+                    positions: Union[str, List[str]] = None, 
+                    color_channels: Union[str, List[str]] = None,
+                    custom_function: Callable = None, 
+                    **custom_kwargs):
         """
         Filters a dataframe base on a specified track. supports two modes (or combined mode)
         if min_occurence > 0, filters out any row for which the unique value in the target column has less than min_occurence entries
@@ -469,13 +490,22 @@ class FluidExperiment:
         Returns:
             None: The function updates the data and filter history in place.
         """
+        if positions is None:
+            positions = self.positions
+        if color_channels is None:
+            color_channels = self.color_channels
+            
+        positions = self._save_select(positions)  
+        color_channels = self._save_select(color_channels)
+        
+        
         if min_occurences >= 0:
             print(f"Filtering out {column} with less than {min_occurences} occurences")
         if min_value is not None or max_value is not None:
             print(f"Filtering out {column} with min value {min_value} and max value {max_value}")
         
-        for p in self.positions:
-            for g in self.color_channels:
+        for p in positions:
+            for g in color_channels:
                 print(f"Filtering channel {g} at position {p}:")
                 if custom_function is not None:
                     # apply the custom function with optional additional kwargs
@@ -495,6 +525,32 @@ class FluidExperiment:
                 self.filter_history[p][g].append(summary)
         self._update_information()
         
+    def filter_segment_shape(self,
+                             positions: Union[str, List[str]] = None, 
+                             color_channels: Union[str, List[str]] = None,
+                             smoothness = 0.8):
+        """        Filters the data based on the shape of the segmentation masks for specified positions and color channels.
+        This method applies a shape filter to the segmentation masks, smoothing them based on the specified smoothness parameter.
+        Args:
+            positions (str or [str], optional): The positions to filter. If None, filters all positions in the experiment. Defaults to None.
+            color_channels (str or [str], optional): The color channels to filter. If None, filters all color channels in the experiment. Defaults to None.
+            smoothness (float, optional): The smoothness parameter for the shape filter. Defaults to 0.8.
+        """
+        if positions is None:
+            positions = self.positions
+        if color_channels is None:
+            color_channels = self.color_channels
+            
+        positions = self._save_select(positions)  
+        color_channels = self._save_select(color_channels)
+        
+        for p in positions:
+            for c in color_channels:
+                print(f"Filtering {p} {c} for with smoothness parameter {smoothness}")
+                mask = load_tracking_h5(self.file_paths[p],c)
+                self.data[p][c], summary = filter_by_segment_shape_parallel(self.data[p][c], mask, smoothness)
+                self.filter_history[p][c].append(summary)    
+        
     def drop_positions(self, positions: Union[str,List[str]]):
         """
         Removes specified positions from the experiment.
@@ -510,6 +566,7 @@ class FluidExperiment:
             print(f"Dropping position {p} from experiment")
             self.data.pop(p)
             self.filter_history.pop(p)
+            self.file_paths.pop(p)
             if self.metadata is not None:
                 self.metadata.drop(index = p, inplace= True)
         self._update_information()
@@ -552,6 +609,27 @@ class FluidExperiment:
                     else:
                         print(f"Warning: Column '{col}' not found in position {p}, color channel {c}. Skipping.")
         self._update_information()
+
+    def fix_base_path(self, 
+                      base_path: str,
+                      positions: Union[str,List[str]] = None,
+                      ):
+        """        Updates the file paths of the specified positions to a new base path.
+        This method is useful when the experiment data has been moved to a different directory.
+        Args:
+            base_path (str): The new base path to which the file paths should be updated.
+            positions (str or [str], optional): The positions whose file paths should be updated. 
+                                                If None, updates all positions. Defaults to None.
+        """
+        if positions is None:
+            positions = self.positions
+        positions = self._save_select(positions)
+        
+        for p in positions:
+            old_path = self.file_paths[p]
+            pos_folder = os.path.basename(old_path.rstrip("/\\"))
+            new_path = os.path.join(base_path, pos_folder)
+            self.file_paths[p] = new_path    
 
     def create_metadata_template(self, path = None, overwrite = False):
             """
@@ -635,6 +713,7 @@ class FluidExperiment:
         self.positions.extend(other_positions_renamed)
         self._fuse_nested_dict(self.data, other.data, other_positions_renamed)
         self._fuse_nested_dict(self.filter_history, other.filter_history, other_positions_renamed)
+        self._fuse_nested_dict(self.file_paths, other.file_paths, other_positions_renamed)
         
         # Fuse metadata
         if self.metadata is not None and other.metadata is not None:
@@ -700,6 +779,10 @@ class FluidExperiment:
         self.filter_history = OrderedDict(
             (new_name if key == old_name else key, value)
             for key, value in self.filter_history.items()
+        )
+        self.file_paths = OrderedDict(
+            (new_name if key == old_name else key, value)
+            for key, value in self.file_paths.items()
         )
         
         # Update metadata if it exists
@@ -783,6 +866,58 @@ class FluidExperiment:
                     # Assign the bin name to the rows that match the bin values
                     self.data[p][c].loc[(self.data[p][c][data_column] >= lower) & (self.data[p][c][data_column] < upper), bin_column_name] = bin_name
         self._update_information()
+    
+    def combine_channels(self,
+                         new_channel: str, 
+                         used_channels: List[str],
+                         mode = "difference",
+                         force_overwrite = False,
+                         radius: int = 0):
+        """ Combines multiple color channels into a new channel using specified operations.
+        This method allows you to create a new channel by applying set operations (e.g., union, intersection, difference)
+        on the specified used channels. The new channel is created for each position in the experiment.
+        Args:
+            new_channel (str): The name for the new channel to be created.
+            used_channels (List[str]): List of color channels to be used for the operation.
+            mode (str, optional): The operation to apply. Can be "union", "intersection", or "difference". Defaults to "difference".
+            force_overwrite (bool, optional): If True, overwrites existing data for the new channel. Defaults to False.
+            radius (int): The radius (px) within which will be checked if there is an overlapp. Larger number may increase accuracy at the cost of performance
+        Raises:
+            KeyError: If the new channel name already exists in the experiment.
+            FileExistsError: If the new channel data already exists and force_overwrite is False.
+        Returns:
+            None: The function updates the experiment data with the new channel.
+        """
+        
+        print(f"Creating a new channel with name {new_channel} from operation {mode} applied in order to {used_channels}")
+        if new_channel in self.color_channels:
+            raise KeyError(f"The selected name for new channel {new_channel} already exists in experiment! Use a unique name")
+            
+        
+        for p in self.positions:
+            
+            if os.path.exists(os.path.join(self.file_paths[p],new_channel)) and not force_overwrite:
+                raise FileExistsError(f"Warning: data for channel with name {new_channel} already exists. use force_overwrite = True to forcefully overwrite with new data")
+            self.filter_history[p][new_channel] = []
+            
+            print(f"Calculate calculate new channel for position {p}")
+            masks = {}
+            data = self.get_data([p], used_channels)[p]
+            for c in used_channels:
+                masks[c] = load_tracking_h5(self.file_paths[p],c)
+                
+    
+            data_out, mask_out = multichannel_set_operations(data, masks, type = mode, radius= radius)
+            
+            #create path for new segment file
+            save_segmentations_h5(mask_out,self.file_paths[p],new_channel, binary= False)
+            save_segmentations_h5(mask_out,self.file_paths[p],new_channel, binary=True)
+            save_tracking_data(data_out,self.file_paths[p],new_channel)
+            self.data[p][new_channel] = data_out
+                        
+        self.color_channels.append(new_channel)
+                
+    
         
 # ==========================================================    
 # ==================== CALCULATION METHODS =================
@@ -793,7 +928,8 @@ class FluidExperiment:
                               id_column: str, 
                               value_column: str, 
                               frame_column: str = "frame",
-                              growth_rate_column: str = "growth_rate", 
+                              growth_rate_column: str = "growth_rate",
+                              centric: bool = False, 
                               custom_method: Callable = None, 
                               **custom_kwargs):
         """
@@ -806,6 +942,7 @@ class FluidExperiment:
             frame_column (str): column representing frame index. Defaults to "frame"
             growth_rate_column (str): name for the new growth rate column. Defaults to "growth_rate"
             r_squared_column (str): name for the new R-squared column. Defaults to "growth_rsquared"
+            centric (bool): should growth rate be calculated centered on each frame (i.e past and future data), defaults to False = only future data
             custom_method (function): custom method to be used for calculation. defaults to = None
             **custom_kwargs : additional arguments the custom function may take
         """
@@ -820,6 +957,7 @@ class FluidExperiment:
                                                             value_column,
                                                             frame_column,
                                                             growth_rate_column,
+                                                            centric,
                                                             **custom_kwargs)
                 else:    
                     # Default midap-tools method
@@ -828,7 +966,8 @@ class FluidExperiment:
                                                             id_column, 
                                                             value_column,
                                                             frame_column,
-                                                            growth_rate_column)
+                                                            growth_rate_column,
+                                                            centric)
         self._update_information()
    
     def calculate_local_neighborhood(self, 
@@ -858,7 +997,7 @@ class FluidExperiment:
             print(f"Calculate neighborhoods for position {p}")
             mask = {}
             for c in self.color_channels:
-                mask[c] = load_segmentations_h5(os.path.join(self.path, p),c)
+                mask[c] = load_segmentations_h5(self.file_paths[p],c)
             if custom_function is None:
                 #default method for neighborhood calculation from segmentations
                 self.data[p] = compute_neighborhood_segmentation(self.data[p],
@@ -1250,7 +1389,9 @@ class FluidExperiment:
                              frame: int, 
                              positions: Union[str, List[str]] = None, 
                              color_channels: Union[str, List[str]] = None, 
-                             color: List[Tuple[int, int, int]] = None):
+                             color: List[Tuple[int, int, int]] = None,
+                             show_distance = None,
+                             ):
         """
         Plots a selected frame from the experiment data with optional filtering by positions and color channels.
         This method overlays segmentation data for the specified frame from each selected color channel
@@ -1264,6 +1405,7 @@ class FluidExperiment:
                 If None, all loaded color channels are used. Defaults to None.
             color ([(int,int,int)], optional): List of RGB color tuples (value range 0 to 255) to use for visualizing each channel.
                 If None, default color mappings are used by the plotting function. Defaults to None. needs to be of length(color_channels)
+            show_distance (int): if set, a red circle with this px radius is drawn in the center. defaults to None = no circle
         """
         if color_channels is None:
             color_channels = self.color_channels   
@@ -1276,9 +1418,45 @@ class FluidExperiment:
         for p in positions:
             array = {}
             for c in color_channels:
-                array[c] = load_segmentations_h5(os.path.join(self.path, p),c)
-            plot_frame_cv2_jupyter_dict(array,frame, color, title = f"{p}: Overlay of Channels")
+                array[c] = load_segmentations_h5(self.file_paths[p],c)
+            plot_frame_cv2_jupyter_dict(array,frame, color, title = f"{p}: Overlay of Channels", show_distance = show_distance)
  
+    def render_frame_gif(self, 
+                                outfile_prefix: str = "selected_frames", 
+                                show_distance: int = None,
+                                positions: Union[str, List[str]] = None, 
+                                color_channels: Union[str, List[str]] = None):
+        """
+        Creates a GIF animation for each position showing overlayed segmentation maps across all frames.
+
+        Args:
+            outfile_prefix (str): Prefix for output GIF filenames (e.g., 'selected_frames_positionX.gif').
+            show_distance (int): Radius of red circle to draw at center (in px), optional.
+            positions (str or list): Positions to include. Defaults to all.
+            color_channels (str or list): Color channels to include. Defaults to all.
+        """
+        if color_channels is None:
+            color_channels = self.color_channels
+        if positions is None:
+            positions = self.positions
+        color_channels = self._save_select(color_channels)
+        positions = self._save_select(positions)
+
+        for p in positions:
+            print(f"Generating segmentation GIF for position: {p}")
+            array = {c: load_segmentations_h5(self.file_paths[p], c) for c in color_channels}
+            images = []
+            for f in range(self.n_frames + 1):
+                fig = plot_frame_cv2_jupyter_dict(array, frame_index=f, title=f"{p}: Frame {f}", show_distance=show_distance, show=False)
+                canvas = FigureCanvas(fig)
+                canvas.draw()
+                image = np.frombuffer(canvas.buffer_rgba(), dtype='uint8')
+                image = image.reshape(canvas.get_width_height()[::-1] + (4,))[:, :, :3]  # Strip alpha
+                images.append(image)
+                plt.close(fig)
+            output_path = f"{outfile_prefix}_{p}.gif"
+            imageio.mimsave(output_path, images, fps=2)
+
     def plot_spatial_maps(self,
                                        frame: int,
                                        property_column: str,
@@ -1311,12 +1489,66 @@ class FluidExperiment:
         for p in positions:
             array = {}
             for c in color_channels:
-                array[c] = load_tracking_h5(os.path.join(self.path, p),c)
+                array[c] = load_tracking_h5(self.file_paths[p],c)
             plot_spatial_maps(array, 
                               data[p], 
                               property = property_column, 
                               frame_number= frame,
                               title= f"{p}: spatial map of {property_column} at frame {frame}",)
+ 
+    def render_spatial_maps_gif(self, 
+                                property_column: str,
+                                outfile_prefix: str = "spatial_maps",
+                                positions: Union[str, List[str]] = None,
+                                color_channels: Union[str, List[str]] = None):
+        """
+        Creates a GIF animation for each position showing spatial maps (segmentation colored by attribute) across all frames.
+
+        Args:
+            property_column (str): Data column to color by (must exist in tracking data).
+            outfile_prefix (str): Prefix for output GIF filenames (e.g., 'spatial_maps_pos1.gif').
+            positions (str or list): Positions to include. Defaults to all.
+            color_channels (str or list): Channels to include. Defaults to all.
+        """
+        from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+
+        if color_channels is None:
+            color_channels = self.color_channels
+        if positions is None:
+            positions = self.positions
+        color_channels = self._save_select(color_channels)
+        positions = self._save_select(positions)
+
+        for p in positions:
+            print(f"Generating spatial map GIF for position: {p}")
+            seg = {c: load_tracking_h5(self.file_paths[p], c) for c in color_channels}
+            data = self.get_data([p], color_channels)
+            images = []
+            for f in range(self.n_frames + 1):
+                fig = plot_spatial_maps(seg, 
+                                        data[p], 
+                                        property=property_column, 
+                                        frame_number=f,
+                                        title=f"{p}: {property_column} at Frame {f}",
+                                        show=False)
+                canvas = FigureCanvas(fig)
+                canvas.draw()
+                image = np.frombuffer(canvas.buffer_rgba(), dtype='uint8')
+                image = image.reshape(canvas.get_width_height()[::-1] + (4,))[:, :, :3]
+                images.append(image)
+                plt.close(fig)
+            output_path = f"{outfile_prefix}_{p}.gif"
+            imageio.mimsave(output_path, images, fps=2)
+ 
+    def report_file_paths(self):
+        """ Prints the file paths of all positions in the experiment.
+        This method iterates through the positions and prints the corresponding file paths.
+        It is useful for verifying the file structure and ensuring that all positions are correctly linked to their data files.
+        Returns:
+            None: The function prints the file paths to the console.
+        """
+        for p in self.positions:
+            print(f"Position: {p}, File Path: {self.file_paths[p]}")
  
     def report_filter_history(self):
         """
@@ -1589,6 +1821,13 @@ class FluidExperiment:
                         history_group = channel_group.create_group(str(i))
                         for key, value in history.items():
                             history_group.attrs[key] = value
+                            
+            # Save file paths
+            file_paths_group = h5file.create_group('file_paths')
+            for key, value in self.file_paths.items():
+                print(key)
+                print(value)
+                file_paths_group.create_dataset(key, data=str(value))
 
             # Save experiment metadata
             experiment_info_group = h5file.create_group('experiment_info')

@@ -85,13 +85,20 @@ def plot_frame_cv2_jupyter_dict(array_dict,
                                 frame_index=0, 
                                 colors=None, 
                                 figsize=(8, 8), 
-                                title = None):
+                                title=None,
+                                show_distance: int = None,
+                                show: bool = True):
     """
     Displays overlay of boolean masks from a dict of 3D arrays (Jupyter-friendly).
-    
-    array_dict: dict with keys as names and values as 3D boolean numpy arrays
-    frame_index: index along axis 0 to extract 2D slices
-    colors: optional list of BGR tuples
+
+    Args:
+        array_dict: dict with keys as names and values as 3D boolean numpy arrays
+        frame_index: index along axis 0 to extract 2D slices
+        colors: optional list of BGR tuples
+        figsize: size of the figure in inches
+        title: plot title
+        show_distance: if set, a red circle with this px radius is drawn in the center
+        show (bool): if False, the function will return a figure object that can be used for other operations 
     """
     if not array_dict:
         raise ValueError("Input dictionary is empty.")
@@ -133,18 +140,27 @@ def plot_frame_cv2_jupyter_dict(array_dict,
         rgb_color = (color[2]/255, color[1]/255, color[0]/255)
         legend_patches.append(Patch(color=rgb_color, label=name))
 
+    # Draw center circle if requested
+    if show_distance is not None and show_distance > 0:
+        center_y = shape[0] // 2
+        center_x = shape[1] // 2
+        cv2.circle(overlay, (center_x, center_y), show_distance, (0, 0, 255), thickness=3)  # Red circle
+
     # Convert BGR to RGB for display
     overlay_rgb = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
 
     # Plot
-    plt.figure(figsize=figsize)
+    fig = plt.figure(figsize=figsize)
     plt.imshow(overlay_rgb)
     if title is None:
         title = "Overlay of Channels"
     plt.title(f"{title} at Frame {frame_index}")
     plt.axis('off')
     plt.legend(handles=legend_patches, loc='upper right')
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        return fig
     
 def plot_xy_correlation(
     df: Union[pd.DataFrame, dict],
@@ -306,7 +322,8 @@ def plot_spatial_maps(array_dict: dict,
                       property: str,
                       frame_number: int = 0,
                       title: str = None,
-                      silent: bool = True):
+                      silent: bool = True,
+                      show: bool = True):
     """
     Plots spatial maps of cell property. Adapted from code received from Simon van Vilet
 
@@ -317,6 +334,7 @@ def plot_spatial_maps(array_dict: dict,
         frame_number (int, optional): frame number to show, in case of 3D label stack, defaults to 0
         title (str, optional): title of the plot, defaults to None
         silent (bool, optional): if True, suppresses warnings about missing cells in the frame, defaults to True
+        show (bool): if False, the function will return a figure object that can be used for other operations 
 
     Returns:
         Creates a matplotlib figure with spatial maps of cell property at given frame and a colorbar
@@ -354,4 +372,8 @@ def plot_spatial_maps(array_dict: dict,
         cbar = fig.colorbar(im, ax=axs, location='right', shrink=0.8, label=property)
 
     fig.suptitle(title or f'Spatial Maps of {property} at Frame {frame_number}')
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        return fig
+

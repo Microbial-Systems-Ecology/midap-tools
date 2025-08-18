@@ -12,6 +12,7 @@ def get_requirements():
         "statsmodels",
         "pytest",
         "scikit-learn",
+        "scikit-image"
         "plotnine",
         "seaborn",
         "imageio"
@@ -19,7 +20,7 @@ def get_requirements():
 
 setup(
     name="midap-tools",
-    version="1.0.0",
+    version="1.1.0",
     description="A post processing package for midap data.",
     long_description=(
         "# MIDAP-tools: A post processing package for midap data\n\n"

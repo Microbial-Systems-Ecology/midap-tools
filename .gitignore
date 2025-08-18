@@ -6,3 +6,4 @@ xy_animation*
 .DS_store
 *.ipynb_checkpoints*
 notebooks/test_*
+*.gif

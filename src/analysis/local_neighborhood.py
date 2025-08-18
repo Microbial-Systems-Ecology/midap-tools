@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 def compute_neighborhood_segmentation(data: dict, 
-                                      masks, 
+                                      masks: dict, 
                                       neighborhood_prefix: str = "density_", 
                                       distance_threshold: int = 50,
                                       include_empty: bool = True):
