@@ -12,7 +12,7 @@ def filter_by_column(
     max_value: Union[float, None] = None
 ) -> Tuple[pd.DataFrame, dict]:
     """
-    Filters a track output file (loaded as pd.DataFrame) based on:
+    Filters indidvidual values in a track output file (loaded as pd.DataFrame) based on:
     - minimum number of occurrences of values in the specified column
     - minimum and maximum value thresholds
 
@@ -175,3 +175,80 @@ def filter_by_segment_shape_parallel(data: pd.DataFrame,
     }
 
     return retained_df, summary
+
+
+def filter_id_by_data_ranges(
+    df: pd.DataFrame,
+    column: str,
+    min_occurences: int = 0,
+    min_value: Union[float, None] = None,
+    max_value: Union[float, None] = None,
+    id_column: str = "trackID",
+) -> Tuple[pd.DataFrame, dict]:
+    """
+    Filters entire IDs (e.g., trackIDs) in a track output file (loaded as pd.DataFrame) based on:
+    - minimum number of occurrences (rows) per id_column
+    - minimum and maximum thresholds on `column`; if ANY datapoint for an ID violates a threshold,
+      all rows for that ID are removed.
+
+    Args:
+        df (pd.DataFrame): Input DataFrame.
+        column (str): Data column used for min/max checks (e.g., "area", "growth_rate").
+        min_occurences (int, optional): Minimum number of rows required for each ID. Defaults to 0 (no filter).
+        min_value (float, optional): Minimum allowed value at all rows for an ID. Defaults to None (no filter).
+        max_value (float, optional): Maximum allowed value at all rows for an ID. Defaults to None (no filter).
+        id_column (str, optional): Column holding the identifier (e.g., "trackID"). Defaults to "trackID".
+
+    Returns:
+        Tuple[pd.DataFrame, dict]: Filtered DataFrame and summary dictionary.
+    """
+    if df.empty:
+        return df, {}
+
+    df = df.copy()
+    total_rows_before = len(df)
+    ids_before = df[id_column].nunique()
+
+
+    if min_occurences > 0:
+        id_counts = df[id_column].value_counts()
+        ids_meeting_occ = set(id_counts[id_counts >= min_occurences].index)
+    else:
+        ids_meeting_occ = set(df[id_column].unique())
+
+    violating_ids = set()
+    if min_value is not None:
+        violating_ids.update(df.loc[df[column] < min_value, id_column].unique())
+    if max_value is not None:
+        violating_ids.update(df.loc[df[column] > max_value, id_column].unique())
+    violating_ids = set(violating_ids)
+
+    ids_removed_by_occ = set(df[id_column].unique()) - ids_meeting_occ
+    ids_removed_by_range = violating_ids - ids_removed_by_occ
+
+    keep_ids = ids_meeting_occ - violating_ids
+    df = df[df[id_column].isin(keep_ids)]
+
+    total_rows_after = len(df)
+    ids_after = df[id_column].nunique()
+
+    rate_rows = int(((total_rows_before - total_rows_after) / total_rows_before) * 100) if total_rows_before else 0
+    rate_ids = int(((ids_before - ids_after) / ids_before) * 100) if ids_before else 0
+
+    summary = {
+        "id_column": id_column,
+        "data_column_filtered": column,
+        "min_occurences": min_occurences,
+        "min_value": min_value if min_value is not None else "",
+        "max_value": max_value if max_value is not None else "",
+        "unique_ids_before": ids_before,
+        "unique_ids_after": ids_after,
+        "rows_before": total_rows_before,
+        "rows_after": total_rows_after,
+        "filtered_ids_by_min_occurences": len(ids_removed_by_occ),
+        "filtered_ids_by_value_range": len(ids_removed_by_range),
+        "filter_rate_rows": rate_rows,
+        "filter_rate_unique_ids": rate_ids,
+    }
+
+    return df.reset_index(drop=True), summary
