@@ -946,7 +946,7 @@ class FluidExperiment:
             custom_method (function): custom method to be used for calculation. defaults to = None
             **custom_kwargs : additional arguments the custom function may take
         """
-        print(f"Calculate growth rate for {id_column} measured with {value_column} over an integration window of {integration_window}")
+        print(f"Calculate {growth_rate_column} for {id_column} measured with {value_column} over an integration window of {integration_window}")
         for p in self.positions:
             for c in self.color_channels:
                 if custom_method is not None:
