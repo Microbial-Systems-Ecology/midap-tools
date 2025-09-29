@@ -51,7 +51,6 @@ def calculate_growth_rate(df: pd.DataFrame,
 
     return df
 
-
 def calculate_growth_rate_r2(df: pd.DataFrame, 
                           integration_window: int, 
                           id_column: str, 
@@ -106,5 +105,118 @@ def calculate_growth_rate_r2(df: pd.DataFrame,
 
         df.loc[group.index, growth_rate_column] = growth_rates
         df.loc[group.index, r_squared_column] = r_squared
+
+    return df
+
+def calculate_min_max_deltas(df: pd.DataFrame, 
+                          integration_window: int, 
+                          id_column: str, 
+                          value_column: str, 
+                          frame_column: str = "frame", 
+                          growth_rate_column: str = "delta_",
+                          centric: bool = False) -> pd.DataFrame:
+    """
+    Determines the min and max delta within id_column and an integration window 
+
+    Args:
+        df (pd.DataFrame): track output dataframe
+        integration_window (int): number of frames over which to calculate growth
+        id_column (str): entity identifier column (e.g., "trackID")
+        value_column (str): column representing the metric to track (e.g., "area")
+        frame_column (str): column representing frame index. Defaults to "frame"
+        growth_rate_column (str): prefix for the min and max colums. Defaults to "delta_"
+        centric (bool): if True, use a symmetric window around the current frame
+
+    Returns:
+        pd.DataFrame: dataframe with growth rate column added
+    """
+    df = df.copy()
+    max_column = growth_rate_column + "max"
+    min_column = growth_rate_column + "min"
+    df[max_column] = 0.0
+    df[min_column] = 0.0
+
+    grouped = df.groupby(id_column)
+
+    for track_id, group in grouped:
+        group = group.sort_values(frame_column)
+        values = group[value_column].to_numpy()
+        mins = np.full(len(values), np.nan)
+        maxes = np.full(len(values), np.nan)
+
+        for i in range(len(values)):
+            if centric:
+                half_window = integration_window // 2
+                start = i - half_window
+                end = i + half_window + 1
+                if start >= 0 and end <= len(values):
+                    deltas = np.diff(values[start:end])
+                    mins[i] = np.min(deltas)
+                    maxes[i] = np.max(deltas)
+            else:
+                if i + integration_window < len(values):
+                    future_deltas = np.subtract(values[i + 1:i + 1 + integration_window], values[i:i + integration_window])
+                    mins[i] = np.min(future_deltas)
+                    maxes[i] = np.max(future_deltas)
+
+        df.loc[group.index, max_column] = maxes
+        df.loc[group.index, min_column] = mins
+
+    return df
+
+def calculate_min_max_deltas_nona(df: pd.DataFrame, 
+                          integration_window: int, 
+                          id_column: str, 
+                          value_column: str, 
+                          frame_column: str = "frame", 
+                          growth_rate_column: str = "delta_",
+                          centric: bool = False) -> pd.DataFrame:
+    """
+    Determines the min and max delta within id_column and an integration window 
+
+    Args:
+        df (pd.DataFrame): track output dataframe
+        integration_window (int): number of frames over which to calculate growth
+        id_column (str): entity identifier column (e.g., "trackID")
+        value_column (str): column representing the metric to track (e.g., "area")
+        frame_column (str): column representing frame index. Defaults to "frame"
+        growth_rate_column (str): prefix for the min and max colums. Defaults to "delta_"
+        centric (bool): if True, use a symmetric window around the current frame
+
+    Returns:
+        pd.DataFrame: dataframe with growth rate column added
+    """
+    df = df.copy()
+    max_column = growth_rate_column + "max"
+    min_column = growth_rate_column + "min"
+    df[max_column] = 0.0
+    df[min_column] = 0.0
+
+    grouped = df.groupby(id_column)
+
+    for track_id, group in grouped:
+        group = group.sort_values(frame_column)
+        values = group[value_column].to_numpy()
+        mins = np.full(len(values), np.nan)
+        maxes = np.full(len(values), np.nan)
+
+        for i in range(len(values)):
+            if centric:
+                half_window = integration_window // 2
+                start = i - half_window
+                end = i + half_window + 1
+                start = max(start, 0)
+                end = min(end, len(values))
+                deltas = np.diff(values[start:end])
+                mins[i] = np.min(deltas)
+                maxes[i] = np.max(deltas)
+            else:
+                if i + integration_window < len(values):
+                    future_deltas = np.subtract(values[i + 1:i + 1 + integration_window], values[i:i + integration_window])
+                    mins[i] = np.min(future_deltas)
+                    maxes[i] = np.max(future_deltas)
+
+        df.loc[group.index, max_column] = maxes
+        df.loc[group.index, min_column] = mins
 
     return df
