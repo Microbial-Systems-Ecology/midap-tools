@@ -10,7 +10,7 @@ def plot_histogram(
     bins: int = 100,
     title: str = None,
     rec: bool = False,
-    x_range: Optional[Tuple[float, float]] = None
+    x_range: Tuple[float, float] = None
 ):
     """
     Plots histograms of raw values from specified columns in a DataFrame or dict of DataFrames.

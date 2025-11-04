@@ -1075,7 +1075,7 @@ class FluidExperiment:
                            color_channels: Union[str, List[str]] = None, 
                            group_by: str = None,
                            bins: int = 100,
-                           x_range: Optional[Tuple[float, float]] = None
+                           x_range: Tuple[float, float] = None
                            ):
         """
         Plots a QC historgram for selected samples
