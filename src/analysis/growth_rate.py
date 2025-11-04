@@ -128,7 +128,7 @@ def calculate_min_max_deltas(df: pd.DataFrame,
         centric (bool): if True, use a symmetric window around the current frame
 
     Returns:
-        pd.DataFrame: dataframe with growth rate column added
+        pd.DataFrame: dataframe with min and max delta columns added
     """
     df = df.copy()
     max_column = growth_rate_column + "max"
@@ -172,8 +172,8 @@ def calculate_min_max_deltas_nona(df: pd.DataFrame,
                           growth_rate_column: str = "delta_",
                           centric: bool = False) -> pd.DataFrame:
     """
-    Determines the min and max delta within id_column and an integration window 
-
+    Determines the min and max delta within id_column and an integration window.
+    This version of the function will create no Nans 
     Args:
         df (pd.DataFrame): track output dataframe
         integration_window (int): number of frames over which to calculate growth
@@ -184,7 +184,7 @@ def calculate_min_max_deltas_nona(df: pd.DataFrame,
         centric (bool): if True, use a symmetric window around the current frame
 
     Returns:
-        pd.DataFrame: dataframe with growth rate column added
+        pd.DataFrame: dataframe with min and max delta columns added
     """
     df = df.copy()
     max_column = growth_rate_column + "max"

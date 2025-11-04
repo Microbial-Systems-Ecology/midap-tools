@@ -9,7 +9,7 @@ from IPython.display import display
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from collections import OrderedDict
-from typing import Union, List, Callable, Tuple
+from typing import Union, List, Callable, Tuple, Optional
 from fluid_experiment.utilities import (
                                       sort_folder_names,
                                       )
@@ -1073,7 +1073,10 @@ class FluidExperiment:
                            columns: Union[str, List[str]], 
                            positions: Union[str, List[str]] = None, 
                            color_channels: Union[str, List[str]] = None, 
-                           group_by: str = None):
+                           group_by: str = None,
+                           bins: int = 100,
+                           x_range: Optional[Tuple[float, float]] = None
+                           ):
         """
         Plots a QC historgram for selected samples
 
@@ -1082,6 +1085,8 @@ class FluidExperiment:
             position (str or [str], optional): Name of position to be plotted. Defaults to None = one plot for each position.
             color_channel (str or [str], optional): Name of channel to be shown. Defaults to None = all channels shown next to each other.
             group_by  (str): name of metadata column by which data should be aggregated prior to plotting
+            bins (int): Number of bins for each histogram. Default is 100.
+            x_range (Tuple[float, float], optional): Set manual range for x-axis. Defaults to None.
         """
         if positions is not None and group_by is not None:
             print("can not select groups and positions, ignoring positions selection for plot")    
@@ -1093,12 +1098,20 @@ class FluidExperiment:
         if group_by is not None:
             pdat = self.get_aggregate_data(group_by, color_channels)
             for k, v in pdat.items():
-                plot_histogram(v,columns, title = f"histograms for aggregated data {k}")
+                plot_histogram(v,
+                               columns, 
+                               title = f"histograms for aggregated data {k}",
+                               bins = bins,
+                               x_range=x_range)
             return
         else:
             pdat = self.get_data(positions, color_channels)
             for k, v in pdat.items():
-                plot_histogram(v,columns, title = f"histograms for position data {k}")
+                plot_histogram(v,
+                               columns, 
+                               title = f"histograms for position data {k}",
+                               bins = bins,
+                               x_range=x_range)
                    
     def plot_qc(self, 
                 value_column: str, 

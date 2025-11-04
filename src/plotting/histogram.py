@@ -2,14 +2,15 @@ import math
 
 import pandas as pd
 import matplotlib.pyplot as plt
-from typing import Union, List
+from typing import Union, List, Optional, Tuple
 
 def plot_histogram(
     df: Union[pd.DataFrame, dict],
     column: Union[str, List[str]],
     bins: int = 100,
     title: str = None,
-    rec: bool = False
+    rec: bool = False,
+    x_range: Optional[Tuple[float, float]] = None
 ):
     """
     Plots histograms of raw values from specified columns in a DataFrame or dict of DataFrames.
@@ -21,6 +22,7 @@ def plot_histogram(
         bins (int): Number of bins for each histogram. Default is 100.
         title (str): Optional overarching title (for multi-plots).
         rec (bool): Internal flag for recursive calls. Should not be set by the user.
+        x_range (Tuple[float, float], optional): Set manual range for x-axis. Defaults to None = dynamic range for each plot.
     """
     # Normalize column input to list
     if isinstance(column, str):
@@ -49,7 +51,8 @@ def plot_histogram(
                     column=col,
                     bins=bins,
                     title=f'{name} - {col}',
-                    rec=True
+                    rec=True,
+                    x_range=x_range
                 )
 
         for col_idx, col in enumerate(column):
@@ -72,11 +75,14 @@ def plot_histogram(
         if not rec:
             plt.figure(figsize=(6, 4))
 
-        plt.hist(data, bins=bins, edgecolor='black')
+        plt.hist(data, bins=bins, edgecolor='black', range=x_range)
         plt.xlabel('Value')
         plt.ylabel('Frequency')
         plt.title(title or f'Histogram of {col}')
         plt.grid(True)
+
+        if x_range is not None:
+            plt.xlim(x_range)
 
         if not rec:
             plt.tight_layout()
