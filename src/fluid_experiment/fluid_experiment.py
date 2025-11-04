@@ -1579,6 +1579,23 @@ class FluidExperiment:
                     for k, v in h.items():
                         print(f"\t{k}: {v}")
                 print("\n")
+                
+    def report_filter_history_dataframe(self) -> pd.DataFrame:
+        """
+        Creates and returns a pandas data frame of the filter history report
+        """
+        data = self.filter_history.copy()
+        dfs = []
+        for k, v in data.items():
+            for k2, v2 in v.items():
+                df = pd.DataFrame(v2)
+                df["position"] = k
+                df["color_channel"] = k2
+                df["Filter_num"] = [i + 1 for i in range(len(df))]
+                dfs.append(df)
+
+        report = pd.concat(dfs)
+        return report
       
     def report_data_summary(self, 
                             value_column: Union[str, List[str]],
