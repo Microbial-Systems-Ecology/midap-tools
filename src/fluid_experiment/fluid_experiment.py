@@ -485,6 +485,8 @@ class FluidExperiment:
             min_occurences (int, optional): Minimum number of occurrences to retain. Defaults to 0.
             min_value (float, optional): Minimum value threshold. Defaults to None.
             max_value (float, optional): Maximum value threshold. Defaults to None.
+            positions (str or [str], optional): Name of position to be filtered. Defaults to None = all
+            color_channels (str or [str], optional): Name of channels to be filtered. Defaults to None = all
             custom_function (function): can be set to a custom function
             **custom_kwargs : additional arguments the custom function may take
         Returns:
