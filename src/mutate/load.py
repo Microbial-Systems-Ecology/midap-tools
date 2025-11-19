@@ -8,13 +8,19 @@ import pandas as pd
 
 def load_tracking_data(path, group):
     res_path = os.path.join(path,group, "track_output","*.csv")
-    tracking_file = glob.glob(res_path)[0]
+    res_path = glob.glob(res_path)
+    if len(res_path) == 0:
+        raise FileNotFoundError(f"Results data  (track_output/*.csv) for {group} at position path {path} does not exist!")
+    tracking_file = res_path[0]
     data = pd.read_csv(tracking_file)
     return data
 
 def load_segmentations_h5(path, group, binary = True):
     res_path = os.path.join(path,group, "track_output","segmentations*.h5")
-    tracking_file = glob.glob(res_path)[0]
+    res_path = glob.glob(res_path)
+    if len(res_path) == 0:
+        raise FileNotFoundError(f"Segmentation data (track_output/segmentations_*.h5) for {group} at position path {path} does not exist!")
+    tracking_file = res_path[0]
     with h5py.File(tracking_file, 'r') as f:
         data = f["segmentations"][:]
     if binary:
@@ -24,7 +30,10 @@ def load_segmentations_h5(path, group, binary = True):
 
 def load_tracking_h5(path, group):
     res_path = os.path.join(path,group, "track_output","tracking*.h5")
-    tracking_file = glob.glob(res_path)[0]
+    res_path = glob.glob(res_path)
+    if len(res_path) == 0:
+        raise FileNotFoundError(f"tracking data (track_output/tracking_*.h5) for {group} at position path {path} does not exist!")
+    tracking_file = res_path[0]
     
     with h5py.File(tracking_file, 'r') as f:
         data = f["labels"][:]
