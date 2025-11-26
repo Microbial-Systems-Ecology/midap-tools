@@ -18,13 +18,14 @@ from analysis.local_neighborhood import compute_neighborhood_segmentation
 from analysis.global_metrics import compute_global_axes, collect_unique_column_values
 from plotting.histogram import plot_histogram, plot_value_count_histogram
 from plotting.rate_plots import plot_growth_rate_with_ribbon, xy_slope_rate_plot
-from plotting.qc_plots import plot_qc_xy_correlation, plot_qc_xy_correlation_overlay, plot_frame_cv2_jupyter_dict, plot_xy_correlation, plot_spatial_maps, plot_xy_correlation_stacked
+from plotting.qc_plots import plot_qc_xy_correlation, plot_frame_cv2_jupyter_dict, plot_xy_correlation, plot_spatial_maps, plot_xy_correlation_stacked
 from plotting.result_plots import summary_plot
 from report.data_summary import data_summary
 from mutate.fuse import fuse_track_output
 from mutate.filter import filter_by_column, filter_by_segment_shape_parallel
 from mutate.load import load_tracking_data, load_segmentations_h5, load_tracking_h5, save_segmentations_h5, save_tracking_data
 from mutate.combine_channels import multichannel_set_operations
+from mutate.smooth import smooth_data_standard
 
 class FluidExperiment:
     """
@@ -918,6 +919,50 @@ class FluidExperiment:
             self.data[p][new_channel] = data_out
                         
         self.color_channels.append(new_channel)
+        
+    def smooth_data(self, 
+                    integration_window: int, 
+                    id_column: str, 
+                    x_column: str, 
+                    y_column: str = "frame", 
+                    smoothed_postfix: str = "_smoothed",
+                    custom_method: Callable = None, 
+                    **custom_kwargs):
+        """
+        Determines the growth rate of value_column over a specified integration window.
+
+        Args:
+            integration_window (int): number of frames over which to smooth data
+            id_column (str): entity identifier column (e.g., "trackID")
+            x_column (str): column representing the metric to track (e.g., "area")
+            y_column (str): column representing the y data across which we smooth each identifiers value_column. Defaults to "frame"
+            growth_rate_column (str): name for the new growth rate column. Defaults to "growth_rate"
+            centric (bool): if True, use a symmetric window around the current frame
+
+        Returns:
+            pd.DataFrame: dataframe with growth rate column added
+        """
+        print(f"Smooth {x_column} along {y_column} over an integration window of {integration_window}, adding new datacolumn of name {x_column + smoothed_postfix}")
+        for p in self.positions:
+            for c in self.color_channels:
+                if custom_method is not None:
+                    # apply the custom function with optional additional kwargs
+                    self.data[p][c] = custom_method(df = self.data[p][c], 
+                                                    integration_window = integration_window, 
+                                                    id_column = id_column, 
+                                                    x_column = x_column,
+                                                    y_column = y_column,
+                                                    smoothed_postfix = smoothed_postfix,
+                                                    **custom_kwargs)
+                else:    
+                    # Default midap-tools method
+                    self.data[p][c] = smooth_data_standard(df = self.data[p][c], 
+                                                            integration_window = integration_window, 
+                                                            id_column = id_column, 
+                                                            x_column = x_column,
+                                                            y_column = y_column,
+                                                            smoothed_postfix = smoothed_postfix)
+        self._update_information()
                 
     
         
@@ -1123,7 +1168,8 @@ class FluidExperiment:
                 positions: Union[str, List[str]] = None, 
                 color_channels: Union[str, List[str]] = None, 
                 group_by: str = None,
-                overlay_column: str = None):
+                overlay_column: str = None,
+                free_overlay_axes = True):
         """
         Plots QC (Quality Control) scatter plots for selected samples.
 
@@ -1160,7 +1206,8 @@ class FluidExperiment:
                                     frame_column = frame_column,
                                     n = n_samples,
                                     title = f"{k}, {k2}, {id_column}",
-                                    overlay_column = overlay_column)
+                                    overlay_column = overlay_column,
+                                    free_overlay_axes = free_overlay_axes)
 
     def plot_xy_correlation(self,
                             x_column: str,

@@ -15,7 +15,8 @@ def plot_qc_xy_correlation(data: pd.DataFrame,
                            n: int = 5, 
                            random_seed: int = 42,
                            title=None,
-                           overlay_column: str = None):
+                           overlay_column: str = None,
+                           free_overlay_axes = True):
     """
     Creates a QC plot showing XY correlation for `n` random examples grouped by `id_column`.
     Each plot includes a linear regression line with the R² value displayed.
@@ -32,6 +33,7 @@ def plot_qc_xy_correlation(data: pd.DataFrame,
         random_seed (int): Random seed for reproducibility.
         title (str): Optional title.
         overlay_column (str): Optional secondary Y-axis values.
+        free_overlay_axes (bool): should the overlay data be shown with its own axis range?
     """
 
     # Validate columns
@@ -92,7 +94,10 @@ def plot_qc_xy_correlation(data: pd.DataFrame,
 
         # --- OVERLAY AXIS (optional) ---
         if overlay_column:
-            ax2 = ax.twinx()
+            if free_overlay_axes:
+                ax2 = ax.twinx()          # independent axis
+            else:
+                ax2 = ax
             x2_raw = group_data[frame_column].values
             y2_raw = group_data[overlay_column].values
 
@@ -121,16 +126,17 @@ def plot_qc_xy_correlation(data: pd.DataFrame,
             ax2.set_ylabel(overlay_column)
 
             # Merge legends from both axes
-            handles1, labels1 = ax.get_legend_handles_labels()
-            handles2, labels2 = ax2.get_legend_handles_labels()
-            ax.legend(handles1 + handles2, labels1 + labels2,
-                    loc="upper center",
-                    bbox_to_anchor=(0.5, -0.35),
-                    ncol=1,
-                    fontsize=8,
-                    frameon=False)
+            if free_overlay_axes:
+                handles1, labels1 = ax.get_legend_handles_labels()
+                handles2, labels2 = ax2.get_legend_handles_labels()
+                ax.legend(handles1 + handles2, labels1 + labels2,
+                        loc="upper center",
+                        bbox_to_anchor=(0.5, -0.35),
+                        ncol=1,
+                        fontsize=8,
+                        frameon=False)
 
-        else:
+        if overlay_column is None or not free_overlay_axes:
             ax.legend(loc="upper center",
                     bbox_to_anchor=(0.5, -0.35),
                     ncol=1,
