@@ -18,7 +18,7 @@ from analysis.local_neighborhood import compute_neighborhood_segmentation
 from analysis.global_metrics import compute_global_axes, collect_unique_column_values
 from plotting.histogram import plot_histogram, plot_value_count_histogram
 from plotting.rate_plots import plot_growth_rate_with_ribbon, xy_slope_rate_plot
-from plotting.qc_plots import plot_qc_xy_correlation, plot_frame_cv2_jupyter_dict, plot_xy_correlation, plot_spatial_maps, plot_xy_correlation_stacked
+from plotting.qc_plots import plot_qc_xy_correlation, plot_qc_xy_correlation_overlay, plot_frame_cv2_jupyter_dict, plot_xy_correlation, plot_spatial_maps, plot_xy_correlation_stacked
 from plotting.result_plots import summary_plot
 from report.data_summary import data_summary
 from mutate.fuse import fuse_track_output
@@ -1122,7 +1122,8 @@ class FluidExperiment:
                 frame_column: str = "frame",
                 positions: Union[str, List[str]] = None, 
                 color_channels: Union[str, List[str]] = None, 
-                group_by: str = None):
+                group_by: str = None,
+                overlay_column: str = None):
         """
         Plots QC (Quality Control) scatter plots for selected samples.
 
@@ -1158,7 +1159,8 @@ class FluidExperiment:
                                     value_column = value_column,
                                     frame_column = frame_column,
                                     n = n_samples,
-                                    title = f"{k}, {k2}, {id_column}")
+                                    title = f"{k}, {k2}, {id_column}",
+                                    overlay_column = overlay_column)
 
     def plot_xy_correlation(self,
                             x_column: str,

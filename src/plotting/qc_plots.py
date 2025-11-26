@@ -14,69 +14,135 @@ def plot_qc_xy_correlation(data: pd.DataFrame,
                            frame_column: str = "frame", 
                            n: int = 5, 
                            random_seed: int = 42,
-                           title = None):
+                           title=None,
+                           overlay_column: str = None):
     """
     Creates a QC plot showing XY correlation for `n` random examples grouped by `id_column`.
     Each plot includes a linear regression line with the R² value displayed.
 
-    Args:
-        data (pd.DataFrame): The input DataFrame containing the data.
-        id_column (str): The column used to group the data. Defaults to "trackID".
-        value_column (str): The column representing the Y-axis values. Defaults to "major_axis_length".
-        frame_column (str): The column representing the X-axis values. Defaults to "frame".
-        n (int): The number of random examples to plot. Defaults to 5.
-        random_seed (int): The random seed for reproducibility. Defaults to 42.
+    If `overlay_column` is provided, it is plotted on a secondary Y-axis (right side)
+    with its own regression fit.
 
-    Returns:
-        None: Displays the QC plots.
+    Args:
+        data (pd.DataFrame): Input DataFrame.
+        id_column (str): Column used for grouping.
+        value_column (str): Primary Y-axis values.
+        frame_column (str): X-axis values.
+        n (int): Number of random examples.
+        random_seed (int): Random seed for reproducibility.
+        title (str): Optional title.
+        overlay_column (str): Optional secondary Y-axis values.
     """
-    # Ensure reproducibility
+
+    # Validate columns
+    required = {id_column, value_column, frame_column}
+    if overlay_column:
+        required.add(overlay_column)
+
+    missing = required - set(data.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
     np.random.seed(random_seed)
-    
-    # Group data by the id_column
+
     grouped = data.groupby(id_column)
-    
-    # Randomly select `n` groups
-    selected_groups = np.random.choice(list(grouped.groups.keys()), size=min(n, len(grouped.groups)), replace=False)
-    
-    # Set up the plot grid
+    selected_groups = np.random.choice(
+        list(grouped.groups.keys()),
+        size=min(n, len(grouped.groups)),
+        replace=False
+    )
+
+    # Layout
     n_cols = 4
     n_rows = int(np.ceil(len(selected_groups) / n_cols))
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(12, 3 * n_rows))
-    axes = axes.flatten()  # Flatten axes for easy iteration
-    
+    axes = axes.flatten()
+
+    if title is None:
+        title = f"QC-plot for {id_column}"
+
     for ax, group_id in zip(axes, selected_groups):
         group_data = grouped.get_group(group_id)
-        
-        # Extract X and Y values
-        x = group_data[frame_column].values.reshape(-1, 1)
-        y = group_data[value_column].values
-        
-        # Perform linear regression
-        model = LinearRegression()
-        model.fit(x, y)
-        y_pred = model.predict(x)
-        r2 = r2_score(y, y_pred)
-        
-        # Plot the data points
-        ax.scatter(group_data[frame_column], group_data[value_column], label="Data", color="blue", alpha=0.7)
-        
-        # Plot the regression line
-        ax.plot(group_data[frame_column], y_pred, color="red", label=f"Linear Fit (R²={r2:.2f})")
-        
-        # Set plot labels and title
-        if title is None:
-            title = f"QC-plot for {id_column}"
-        
-        ax.set_title(f"{title}: {group_id}")
+
+        x_raw = group_data[frame_column].values
+        y_raw = group_data[value_column].values
+
+        mask = np.isfinite(x_raw) & np.isfinite(y_raw)
+
+        if mask.sum() >= 2:
+            x = x_raw[mask].reshape(-1, 1)
+            y = y_raw[mask]
+
+            model = LinearRegression()
+            model.fit(x, y)
+
+            # Predict over full x-range for plotting
+            y_pred = model.predict(x_raw.reshape(-1, 1))
+            r2 = r2_score(y, model.predict(x))
+        else:
+            y_pred = np.full_like(x_raw, np.nan, dtype=float)
+            r2 = np.nan
+
+        ax.scatter(x_raw, y_raw, color="blue", alpha=0.7, label=value_column)
+        ax.plot(group_data[frame_column], y_pred, color="red",
+                label=f"{value_column} fit (R²={r2:.2f})")
+
         ax.set_xlabel(frame_column)
         ax.set_ylabel(value_column)
-        ax.legend()
-    
-    # Hide unused subplots
+
+        # --- OVERLAY AXIS (optional) ---
+        if overlay_column:
+            ax2 = ax.twinx()
+            x2_raw = group_data[frame_column].values
+            y2_raw = group_data[overlay_column].values
+
+            mask2 = np.isfinite(x2_raw) & np.isfinite(y2_raw)
+
+            if mask2.sum() >= 2:
+                x2 = x2_raw[mask2].reshape(-1, 1)
+                y2 = y2_raw[mask2]
+
+                model2 = LinearRegression()
+                model2.fit(x2, y2)
+
+                y2_pred = model2.predict(x2_raw.reshape(-1, 1))
+                r2_2 = r2_score(y2, model2.predict(x2))
+            else:
+                y2_pred = np.full_like(x2_raw, np.nan, dtype=float)
+                r2_2 = np.nan
+
+            ax2.scatter(x2_raw, y2_raw,
+                        color="green", alpha=0.6, marker="x",
+                        label=overlay_column)
+            ax2.plot(group_data[frame_column], y2_pred, color="darkgreen",
+                     linestyle="--",
+                     label=f"{overlay_column} fit (R²={r2_2:.2f})")
+
+            ax2.set_ylabel(overlay_column)
+
+            # Merge legends from both axes
+            handles1, labels1 = ax.get_legend_handles_labels()
+            handles2, labels2 = ax2.get_legend_handles_labels()
+            ax.legend(handles1 + handles2, labels1 + labels2,
+                    loc="upper center",
+                    bbox_to_anchor=(0.5, -0.35),
+                    ncol=1,
+                    fontsize=8,
+                    frameon=False)
+
+        else:
+            ax.legend(loc="upper center",
+                    bbox_to_anchor=(0.5, -0.35),
+                    ncol=1,
+                    fontsize=8,
+                    frameon=False)
+
+        ax.set_title(f"{title}: {group_id}")
+
+    # Hide empty axes
     for ax in axes[len(selected_groups):]:
         ax.axis("off")
-    
+
     plt.tight_layout()
     plt.show()
     
