@@ -15,7 +15,8 @@ def get_requirements():
         "scikit-image",
         "plotnine",
         "seaborn",
-        "imageio"
+        "imageio",
+        "scikit-misc"
     ]
 
 setup(
