@@ -57,6 +57,7 @@ def calculate_growth_rate_r2(df: pd.DataFrame,
                           value_column: str, 
                           frame_column: str = "frame", 
                           growth_rate_column: str = "growth_rate",
+                          centric: bool = False,
                           r_squared_column: str = "growth_rsquared") -> pd.DataFrame:
     """
     Determines the growth rate and R-squared of value_column over a specified integration window. Warning, this function is considerably slower due to r2 calculations.
@@ -107,6 +108,53 @@ def calculate_growth_rate_r2(df: pd.DataFrame,
         df.loc[group.index, r_squared_column] = r_squared
 
     return df
+
+def growth_rate_polyfit(df: pd.DataFrame, 
+                          integration_window: int, 
+                          id_column: str, 
+                          value_column: str, 
+                          frame_column: str = "frame", 
+                          growth_rate_column: str = "growth_rate",
+                          centric: bool = False) -> pd.DataFrame:
+    """
+    Determines the growth rate and R-squared of value_column over a specified integration window. Warning, this function is considerably slower due to r2 calculations.
+
+    Args:
+        df (pd.DataFrame): track output dataframe
+        integration_window (int): number of frames over which to calculate growth and R-squared
+        id_column (str): entity identifier column (e.g., "trackID")
+        value_column (str): column representing the metric to track (e.g., "area")
+        frame_column (str): column representing frame index. Defaults to "frame"
+        growth_rate_column (str): name for the new growth rate column. Defaults to "growth_rate"
+
+    Returns:
+        pd.DataFrame: dataframe with growth rate and R-squared columns added
+    """
+    df = df.copy()
+    df[growth_rate_column] = 0.0
+
+    grouped = df.groupby(id_column)
+
+    for track_id, group in grouped:
+        group = group.sort_values(frame_column)
+        values = group[value_column].to_numpy()
+        frames = group[frame_column].to_numpy()
+        growth_rates = np.zeros(len(values))
+
+        for i in range(len(values)):
+            if i + integration_window < len(values):
+                future_values = values[i + 1:i + 1 + integration_window]
+                future_frames = frames[i + 1:i + 1 + integration_window]
+                # polyfit for slope calculation
+                p = np.polyfit(future_frames, future_values, 1)
+                growth_rates[i] = p[0]
+            else:
+                growth_rates[i] = np.nan
+
+        df.loc[group.index, growth_rate_column] = growth_rates
+
+    return df
+
 
 def calculate_min_max_deltas(df: pd.DataFrame, 
                           integration_window: int, 
