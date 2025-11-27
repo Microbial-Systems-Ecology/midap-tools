@@ -48,7 +48,7 @@ def smooth_linear(df: pd.DataFrame,
                     y_column: str = "frame", 
                     smoothed_postfix: str = "_smoothed"):
     """
-    Method that uses linear filter (np.convolution) to correct the data. Comparable to a rolling window average.
+    Method that uses linear filter (np.convolution) to correct the data. Comparable to a rolling window average. warning, may introduce light artefacts on left and right border of track
     
     Args:
         df (pd.DataFrame): track output dataframe
