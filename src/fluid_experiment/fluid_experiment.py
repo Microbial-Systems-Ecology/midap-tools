@@ -25,7 +25,7 @@ from mutate.fuse import fuse_track_output
 from mutate.filter import filter_by_column, filter_by_segment_shape_parallel
 from mutate.load import load_tracking_data, load_segmentations_h5, load_tracking_h5, save_segmentations_h5, save_tracking_data
 from mutate.combine_channels import multichannel_set_operations
-from mutate.smooth import smooth_data_standard
+from mutate.smooth import smooth_linear
 
 class FluidExperiment:
     """
@@ -942,7 +942,8 @@ class FluidExperiment:
         Returns:
             pd.DataFrame: dataframe with growth rate column added
         """
-        print(f"Smooth {x_column} along {y_column} over an integration window of {integration_window}, adding new datacolumn of name {x_column + smoothed_postfix}")
+        m_name = "LINEAR" if custom_method is None else "CUSTOM" 
+        print(f"Smooth {x_column} along {y_column} over an integration window of {integration_window} with {m_name} method, adding new datacolumn of name {x_column + smoothed_postfix}")
         for p in self.positions:
             for c in self.color_channels:
                 if custom_method is not None:
@@ -956,7 +957,7 @@ class FluidExperiment:
                                                     **custom_kwargs)
                 else:    
                     # Default midap-tools method
-                    self.data[p][c] = smooth_data_standard(df = self.data[p][c], 
+                    self.data[p][c] = smooth_linear(df = self.data[p][c], 
                                                             integration_window = integration_window, 
                                                             id_column = id_column, 
                                                             x_column = x_column,
