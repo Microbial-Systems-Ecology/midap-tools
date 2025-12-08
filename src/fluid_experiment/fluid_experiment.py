@@ -25,7 +25,7 @@ from mutate.fuse import fuse_track_output
 from mutate.filter import filter_by_column, filter_by_segment_shape_parallel
 from mutate.load import load_tracking_data, load_segmentations_h5, load_tracking_h5, save_segmentations_h5, save_tracking_data
 from mutate.combine_channels import multichannel_set_operations
-from mutate.smooth import smooth_linear
+from mutate.smooth import smooth_svagol
 
 class FluidExperiment:
     """
@@ -929,7 +929,8 @@ class FluidExperiment:
                     custom_method: Callable = None, 
                     **custom_kwargs):
         """
-        Determines the growth rate of value_column over a specified integration window.
+        Smoothes a data column within trackID over time. by default will use a Savitzky–Golay filter with a polynomal order of 2.
+        See notebooks/preset_analyses/optimize_smoothing.ipynb for more options.
 
         Args:
             integration_window (int): number of frames over which to smooth data
@@ -957,12 +958,13 @@ class FluidExperiment:
                                                     **custom_kwargs)
                 else:    
                     # Default midap-tools method
-                    self.data[p][c] = smooth_linear(df = self.data[p][c], 
+                    self.data[p][c] = smooth_svagol(df = self.data[p][c], 
                                                             integration_window = integration_window, 
                                                             id_column = id_column, 
                                                             x_column = x_column,
                                                             y_column = y_column,
-                                                            smoothed_postfix = smoothed_postfix)
+                                                            smoothed_postfix = smoothed_postfix,
+                                                            poly_degree= 2)
         self._update_information()
                 
     
@@ -977,7 +979,7 @@ class FluidExperiment:
                               value_column: str, 
                               frame_column: str = "frame",
                               growth_rate_column: str = "growth_rate",
-                              centric: bool = False, 
+                              centric: bool = True, 
                               custom_method: Callable = None, 
                               **custom_kwargs):
         """
