@@ -1,0 +1,47 @@
+name: CI - Build & Test
+
+on:
+  schedule:
+    # Run once a month (1st day, 00:00 UTC)
+    - cron: '0 0 1 * *'
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - dev
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Miniconda
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          python-version: ${{ matrix.python }}
+          auto-activate-base: false
+          miniconda-version: latest
+
+      - name: Create conda environment
+        run: |
+          conda create -y -n midap-tools python=${{ matrix.python }}
+
+      - name: Install dependencies into conda environment
+        run: |
+          # Install necessary packages (pytest included as requested)
+          conda install -y -n midap-tools -c conda-forge notebook ipykernel jupyterlab pip
+
+      - name: Install package (editable) and run tests
+        run: |
+          # Use conda-run to execute commands inside the named environment cross-platform
+          conda run -n midap-tools pip install -e .
+          conda run -n midap-tools pytest -q tests

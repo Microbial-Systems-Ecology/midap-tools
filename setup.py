@@ -15,12 +15,13 @@ def get_requirements():
         "scikit-image",
         "plotnine",
         "seaborn",
-        "imageio"
+        "imageio",
+        "scikit-misc"
     ]
 
 setup(
     name="midap-tools",
-    version="1.2.0",
+    version="1.3.0",
     description="A post processing package for midap data.",
     long_description=(
         "# MIDAP-tools: A post processing package for midap data\n\n"

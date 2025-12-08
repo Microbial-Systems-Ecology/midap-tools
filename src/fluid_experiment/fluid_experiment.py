@@ -9,7 +9,7 @@ from IPython.display import display
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from collections import OrderedDict
-from typing import Union, List, Callable, Tuple
+from typing import Union, List, Callable, Tuple, Optional
 from fluid_experiment.utilities import (
                                       sort_folder_names,
                                       )
@@ -25,6 +25,7 @@ from mutate.fuse import fuse_track_output
 from mutate.filter import filter_by_column, filter_by_segment_shape_parallel
 from mutate.load import load_tracking_data, load_segmentations_h5, load_tracking_h5, save_segmentations_h5, save_tracking_data
 from mutate.combine_channels import multichannel_set_operations
+from mutate.smooth import smooth_svagol
 
 class FluidExperiment:
     """
@@ -485,6 +486,8 @@ class FluidExperiment:
             min_occurences (int, optional): Minimum number of occurrences to retain. Defaults to 0.
             min_value (float, optional): Minimum value threshold. Defaults to None.
             max_value (float, optional): Maximum value threshold. Defaults to None.
+            positions (str or [str], optional): Name of position to be filtered. Defaults to None = all
+            color_channels (str or [str], optional): Name of channels to be filtered. Defaults to None = all
             custom_function (function): can be set to a custom function
             **custom_kwargs : additional arguments the custom function may take
         Returns:
@@ -916,6 +919,53 @@ class FluidExperiment:
             self.data[p][new_channel] = data_out
                         
         self.color_channels.append(new_channel)
+        
+    def smooth_data(self, 
+                    integration_window: int, 
+                    id_column: str, 
+                    x_column: str, 
+                    y_column: str = "frame", 
+                    smoothed_postfix: str = "_smoothed",
+                    custom_method: Callable = None, 
+                    **custom_kwargs):
+        """
+        Smoothes a data column within trackID over time. by default will use a Savitzky–Golay filter with a polynomal order of 2.
+        See notebooks/preset_analyses/optimize_smoothing.ipynb for more options.
+
+        Args:
+            integration_window (int): number of frames over which to smooth data
+            id_column (str): entity identifier column (e.g., "trackID")
+            x_column (str): column representing the metric to track (e.g., "area")
+            y_column (str): column representing the y data across which we smooth each identifiers value_column. Defaults to "frame"
+            growth_rate_column (str): name for the new growth rate column. Defaults to "growth_rate"
+            centric (bool): if True, use a symmetric window around the current frame
+
+        Returns:
+            pd.DataFrame: dataframe with growth rate column added
+        """
+        m_name = "LINEAR" if custom_method is None else "CUSTOM" 
+        print(f"Smooth {x_column} along {y_column} over an integration window of {integration_window} with {m_name} method, adding new datacolumn of name {x_column + smoothed_postfix}")
+        for p in self.positions:
+            for c in self.color_channels:
+                if custom_method is not None:
+                    # apply the custom function with optional additional kwargs
+                    self.data[p][c] = custom_method(df = self.data[p][c], 
+                                                    integration_window = integration_window, 
+                                                    id_column = id_column, 
+                                                    x_column = x_column,
+                                                    y_column = y_column,
+                                                    smoothed_postfix = smoothed_postfix,
+                                                    **custom_kwargs)
+                else:    
+                    # Default midap-tools method
+                    self.data[p][c] = smooth_svagol(df = self.data[p][c], 
+                                                            integration_window = integration_window, 
+                                                            id_column = id_column, 
+                                                            x_column = x_column,
+                                                            y_column = y_column,
+                                                            smoothed_postfix = smoothed_postfix,
+                                                            poly_degree= 2)
+        self._update_information()
                 
     
         
@@ -929,7 +979,7 @@ class FluidExperiment:
                               value_column: str, 
                               frame_column: str = "frame",
                               growth_rate_column: str = "growth_rate",
-                              centric: bool = False, 
+                              centric: bool = True, 
                               custom_method: Callable = None, 
                               **custom_kwargs):
         """
@@ -946,7 +996,7 @@ class FluidExperiment:
             custom_method (function): custom method to be used for calculation. defaults to = None
             **custom_kwargs : additional arguments the custom function may take
         """
-        print(f"Calculate growth rate for {id_column} measured with {value_column} over an integration window of {integration_window}")
+        print(f"Calculate {growth_rate_column} for {id_column} measured with {value_column} over an integration window of {integration_window}")
         for p in self.positions:
             for c in self.color_channels:
                 if custom_method is not None:
@@ -1073,7 +1123,10 @@ class FluidExperiment:
                            columns: Union[str, List[str]], 
                            positions: Union[str, List[str]] = None, 
                            color_channels: Union[str, List[str]] = None, 
-                           group_by: str = None):
+                           group_by: str = None,
+                           bins: int = 100,
+                           x_range: Tuple[float, float] = None
+                           ):
         """
         Plots a QC historgram for selected samples
 
@@ -1082,6 +1135,8 @@ class FluidExperiment:
             position (str or [str], optional): Name of position to be plotted. Defaults to None = one plot for each position.
             color_channel (str or [str], optional): Name of channel to be shown. Defaults to None = all channels shown next to each other.
             group_by  (str): name of metadata column by which data should be aggregated prior to plotting
+            bins (int): Number of bins for each histogram. Default is 100.
+            x_range (Tuple[float, float], optional): Set manual range for x-axis. Defaults to None.
         """
         if positions is not None and group_by is not None:
             print("can not select groups and positions, ignoring positions selection for plot")    
@@ -1093,12 +1148,20 @@ class FluidExperiment:
         if group_by is not None:
             pdat = self.get_aggregate_data(group_by, color_channels)
             for k, v in pdat.items():
-                plot_histogram(v,columns, title = f"histograms for aggregated data {k}")
+                plot_histogram(v,
+                               columns, 
+                               title = f"histograms for aggregated data {k}",
+                               bins = bins,
+                               x_range=x_range)
             return
         else:
             pdat = self.get_data(positions, color_channels)
             for k, v in pdat.items():
-                plot_histogram(v,columns, title = f"histograms for position data {k}")
+                plot_histogram(v,
+                               columns, 
+                               title = f"histograms for position data {k}",
+                               bins = bins,
+                               x_range=x_range)
                    
     def plot_qc(self, 
                 value_column: str, 
@@ -1107,7 +1170,9 @@ class FluidExperiment:
                 frame_column: str = "frame",
                 positions: Union[str, List[str]] = None, 
                 color_channels: Union[str, List[str]] = None, 
-                group_by: str = None):
+                group_by: str = None,
+                overlay_column: str = None,
+                free_overlay_axes = True):
         """
         Plots QC (Quality Control) scatter plots for selected samples.
 
@@ -1143,7 +1208,9 @@ class FluidExperiment:
                                     value_column = value_column,
                                     frame_column = frame_column,
                                     n = n_samples,
-                                    title = f"{k}, {k2}, {id_column}")
+                                    title = f"{k}, {k2}, {id_column}",
+                                    overlay_column = overlay_column,
+                                    free_overlay_axes = free_overlay_axes)
 
     def plot_xy_correlation(self,
                             x_column: str,
@@ -1566,6 +1633,23 @@ class FluidExperiment:
                     for k, v in h.items():
                         print(f"\t{k}: {v}")
                 print("\n")
+                
+    def report_filter_history_dataframe(self) -> pd.DataFrame:
+        """
+        Creates and returns a pandas data frame of the filter history report
+        """
+        data = self.filter_history.copy()
+        dfs = []
+        for k, v in data.items():
+            for k2, v2 in v.items():
+                df = pd.DataFrame(v2)
+                df["position"] = k
+                df["color_channel"] = k2
+                df["Filter_num"] = [i + 1 for i in range(len(df))]
+                dfs.append(df)
+
+        report = pd.concat(dfs)
+        return report
       
     def report_data_summary(self, 
                             value_column: Union[str, List[str]],
