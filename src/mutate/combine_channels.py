@@ -264,3 +264,102 @@ def get_circular_mask(shape, center, radius):
     Y, X = np.ogrid[:h, :w]
     dist_sq = (X - x0)**2 + (Y - y0)**2
     return dist_sq <= radius**2
+
+def get_intensity_from_bitmap(
+    df: pd.DataFrame,
+    mask: np.ndarray,
+    bitmap_stack: np.ndarray,
+    prefix: str,
+    id_column: str = "trackID",
+    frame_column: str = "frame",
+) -> pd.DataFrame:
+    """
+    Extract intensity statistics from an external image stack using a tracking mask.
+
+    For each row in the input dataframe, this function:
+      - selects the corresponding frame
+      - extracts pixels from bitmap_stack where mask == trackID
+      - computes mean, min, and max intensity values
+
+    The results are appended to the dataframe as new columns.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Tracking dataframe containing at least a frame index column and
+        an integer object/track identifier column.
+    mask : np.ndarray
+        3D array of shape (num_frames, height, width) containing integer
+        labels corresponding to tracked objects.
+    bitmap_stack : np.ndarray
+        3D array of shape (num_frames, height, width) containing intensity
+        values to be measured (e.g. fluorescence, OD).
+    prefix : str
+        Prefix for output columns. The following columns are added:
+        - f"{prefix}_intensity_mean"
+        - f"{prefix}_intensity_min"
+        - f"{prefix}_intensity_max"
+    id_column : str, optional
+        Column name in df that encodes the integer label used in mask.
+    frame_column : str, optional
+        Column name in df that encodes the frame index.
+
+    Returns
+    -------
+    pd.DataFrame
+        A copy of the input dataframe with appended intensity columns.
+
+    Raises
+    ------
+    ValueError
+        If mask and bitmap_stack shapes do not match.
+        If required dataframe columns are missing.
+
+    Notes
+    -----
+    - Frame indices are assumed to be zero-based and aligned with the first
+      axis of mask and bitmap_stack.
+    - If a mask contains no pixels for a given (frame, trackID) pair,
+      NaN values are returned for all statistics.
+    """
+
+    if mask.shape != bitmap_stack.shape:
+        raise ValueError(
+            f"mask shape {mask.shape} does not match bitmap_stack shape {bitmap_stack.shape}"
+        )
+
+    if id_column not in df.columns or frame_column not in df.columns:
+        raise ValueError(
+            f"DataFrame must contain columns '{id_column}' and '{frame_column}'"
+        )
+
+    # Prepare output arrays
+    mean_vals = np.full(len(df), np.nan, dtype=np.float64)
+    min_vals = np.full(len(df), np.nan, dtype=np.float64)
+    max_vals = np.full(len(df), np.nan, dtype=np.float64)
+
+    for i, row in df.iterrows():
+        frame = int(row[frame_column])
+        track_id = int(row[id_column])
+
+        if frame < 0 or frame >= mask.shape[0]:
+            continue
+
+        mask_frame = mask[frame]
+        bitmap_frame = bitmap_stack[frame]
+
+        values = bitmap_frame[mask_frame == track_id]
+
+        if values.size == 0:
+            continue
+
+        mean_vals[i] = values.mean()
+        min_vals[i] = values.min()
+        max_vals[i] = values.max()
+
+    out = df.copy()
+    out[f"{prefix}intensity_mean"] = mean_vals
+    out[f"{prefix}intensity_min"] = min_vals
+    out[f"{prefix}intensity_max"] = max_vals
+
+    return out

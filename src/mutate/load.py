@@ -2,9 +2,10 @@
 import os
 import glob
 import h5py
+import re
 import numpy as np
 import pandas as pd
-
+from PIL import Image
 
 def load_tracking_data(path, group):
     res_path = os.path.join(path,group, "track_output","*.csv")
@@ -38,6 +39,80 @@ def load_tracking_h5(path, group):
     with h5py.File(tracking_file, 'r') as f:
         data = f["labels"][:]
     return data
+
+def load_cut_im_stack(path: str, group: str, invert: bool = False) -> np.ndarray:
+    """
+    Load a sequential stack of cut images from disk into a NumPy array.
+    The function expects images named with a frame index pattern
+    (e.g. frame0001.png, frame0002.png, ..., frameNNNN.png) located at:
+
+        {path}/{group}/cut_im/
+
+    Images are loaded using PIL, converted to single-channel grayscale,
+    sorted numerically by frame index, and stacked into a 3D NumPy array.
+
+    Parameters
+    ----------
+    path : str
+        Root directory containing the group folder.
+    group : str
+        Group identifier subdirectory.
+    invert : bool, optional
+        If True, invert image intensities (255 - intensity) such that:
+        - black corresponds to high signal
+        - white corresponds to low signal
+
+
+    Returns
+    -------
+    np.ndarray
+        A 3D array of shape (num_frames, height, width) with dtype uint8.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no matching frame images are found.
+    ValueError
+        If a frame number cannot be extracted from a filename.
+
+    Notes
+    -----
+    - Frame ordering is determined strictly by the numeric value following
+      the substring "frame" in the filename.
+    - All images are coerced to 8-bit grayscale ("L" mode).
+    - If your data are not single-channel, this function is not suitable
+      without modification.
+    """
+
+    im_path = os.path.join(path, group, "cut_im", "*frame*.png")
+    im_paths = glob.glob(im_path)
+
+    if not im_paths:
+        raise FileNotFoundError(f"No images found matching {im_path}")
+
+    frame_re = re.compile(r"frame(\d+)", re.IGNORECASE)
+
+    def frame_index(p: str) -> int:
+        m = frame_re.search(os.path.basename(p))
+        if not m:
+            raise ValueError(f"Cannot extract frame number from {p}")
+        return int(m.group(1))
+
+    im_paths.sort(key=frame_index)
+
+    frames = []
+    for p in im_paths:
+        with Image.open(p) as im:
+            im = im.convert("L")  # enforce single-channel grayscale
+            arr = np.asarray(im, dtype=np.uint8)
+
+            if invert:
+                arr = 255 - arr
+
+            arr = arr / 255  #renoramlize between 0-1
+            frames.append(arr)
+
+    return np.stack(frames, axis=0)
 
 
 def save_tracking_data(data: pd.DataFrame, 

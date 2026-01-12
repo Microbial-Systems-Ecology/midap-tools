@@ -23,8 +23,8 @@ from plotting.result_plots import summary_plot
 from report.data_summary import data_summary
 from mutate.fuse import fuse_track_output
 from mutate.filter import filter_by_column, filter_by_segment_shape_parallel
-from mutate.load import load_tracking_data, load_segmentations_h5, load_tracking_h5, save_segmentations_h5, save_tracking_data
-from mutate.combine_channels import multichannel_set_operations
+from mutate.load import load_tracking_data, load_segmentations_h5, load_tracking_h5, save_segmentations_h5, save_tracking_data, load_cut_im_stack
+from mutate.combine_channels import multichannel_set_operations, get_intensity_from_bitmap
 from mutate.smooth import smooth_svagol
 
 class FluidExperiment:
@@ -919,6 +919,43 @@ class FluidExperiment:
             self.data[p][new_channel] = data_out
                         
         self.color_channels.append(new_channel)
+        
+    def get_intensity_from_other_channel(self,
+                                        intensity_channel: str,
+                                        positions: Union[str, List[str]] = None, 
+                                        color_channels: Union[str, List[str]] = None,
+                                        invert_intensity: bool = False,
+                                        prefix: str = "extracted_"):
+        """uses the segmentation masks for each channel / position to extract intensity results from a target channel. these will be added to the dataframe (min, max and mean) with a new prefix
+
+        Args:
+            intensity_channel (str): identifier of the channel from which intensity should be extracted
+            positions (str or [str], optional): The positions to filter. If None, filters all positions in the experiment. Defaults to None.
+            color_channels (str or [str], optional): The color channels to filter. If None, filters all color channels in the experiment. Defaults to None.
+            invert_intensity (bool): should the values of the intensity image be inverted? (255 - intensity)
+            prefix (str, optional): prefix added to the new intensity columns. Defaults to "extracted_".
+        """
+        
+        if positions is None:
+            positions = self.positions
+        if color_channels is None:
+            color_channels = self.color_channels
+        positions = self._save_select(positions)  
+        color_channels = self._save_select(color_channels)
+        
+        for p in positions:
+            for c in color_channels:
+                mask = load_tracking_h5(path = self.file_paths[p],
+                                        group = c)
+                bitmap = load_cut_im_stack(path = self.file_paths[p],
+                                           group = intensity_channel, 
+                                           invert = invert_intensity)
+                print(f"Extract intensity metrics from channel {intensity_channel} using the per cell segment data at position {p}, color_channel {c}")
+                self.data[p][c] = get_intensity_from_bitmap(df = self.data[p][c], 
+                                                 mask = mask, 
+                                                 bitmap_stack = bitmap, 
+                                                 prefix = prefix)
+        self._update_information()
         
     def smooth_data(self, 
                     integration_window: int, 
