@@ -1550,7 +1550,8 @@ class FluidExperiment:
             print(f"Generating segmentation GIF for position: {p}")
             array = {c: load_segmentations_h5(self.file_paths[p], c) for c in color_channels}
             images = []
-            for f in range(self.n_frames + 1):
+            n_frames = min([v.shape[0] for k, v in array.items()])
+            for f in range(n_frames):
                 fig = plot_frame_cv2_jupyter_dict(array, frame_index=f, title=f"{p}: Frame {f}", show_distance=show_distance, show=False)
                 canvas = FigureCanvas(fig)
                 canvas.draw()
@@ -1628,7 +1629,8 @@ class FluidExperiment:
             seg = {c: load_tracking_h5(self.file_paths[p], c) for c in color_channels}
             data = self.get_data([p], color_channels)
             images = []
-            for f in range(self.n_frames + 1):
+            n_frames = min([v.shape[0] for k, v in seg.items()])
+            for f in range(n_frames):
                 fig = plot_spatial_maps(seg, 
                                         data[p], 
                                         property=property_column, 
