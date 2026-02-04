@@ -24,6 +24,21 @@ def test_min_occurrences_filter(sample_df):
     assert set(filtered['trackID'].unique()) == set(expected_ids)
     assert all(filtered['trackID'].isin(expected_ids))
     assert summary['min_occurences'] == 2
+    
+def test_max_occurrences_filter(sample_df):
+    filtered, summary = filter_by_column(sample_df, column='trackID', max_occurences=2)
+    expected_ids = [1, 3, 4, 5, 6]
+    assert set(filtered['trackID'].unique()) == set(expected_ids)
+    assert all(filtered['trackID'].isin(expected_ids))
+    assert summary['max_occurences'] == 2
+
+def test_min_and_max_occurrences_filter(sample_df):
+    filtered, summary = filter_by_column(sample_df, column='trackID', min_occurences=2, max_occurences=2)
+    expected_ids = [1, 5]
+    assert set(filtered['trackID'].unique()) == set(expected_ids)
+    assert all(filtered['trackID'].isin(expected_ids))
+    assert summary['max_occurences'] == 2
+    assert summary['min_occurences'] == 2
 
 def test_min_value_filter(sample_df):
     filtered, summary = filter_by_column(sample_df, column='score', min_value=30)

@@ -471,6 +471,7 @@ class FluidExperiment:
                     min_occurences: int = 0, 
                     min_value: float = None, 
                     max_value: float = None, 
+                    max_occurence: int = None,
                     positions: Union[str, List[str]] = None, 
                     color_channels: Union[str, List[str]] = None,
                     custom_function: Callable = None, 
@@ -502,10 +503,12 @@ class FluidExperiment:
         color_channels = self._save_select(color_channels)
         
         
-        if min_occurences >= 0:
+        if min_occurences > 0:
             print(f"Filtering out {column} with less than {min_occurences} occurences")
         if min_value is not None or max_value is not None:
             print(f"Filtering out {column} with min value {min_value} and max value {max_value}")
+        if max_occurence is not None:
+            print(f"Filtering out {column} with more than {max_occurence} occurences")
         
         for p in positions:
             for g in color_channels:
@@ -517,14 +520,16 @@ class FluidExperiment:
                                                                min_occurences=min_occurences, 
                                                                min_value = min_value, 
                                                                max_value = max_value, 
+                                                               max_occurence = max_occurence,
                                                                **custom_kwargs)
                 else:
                     #Default function used by midap-tools
                     self.data[p][g], summary = filter_by_column(self.data[p][g], 
-                                                                column, 
-                                                                min_occurences,
-                                                                min_value, 
-                                                                max_value)
+                                                                column=column, 
+                                                                min_occurences=min_occurences,
+                                                                min_value=min_value, 
+                                                                max_value=max_value,
+                                                                max_occurences=max_occurence)
                 self.filter_history[p][g].append(summary)
         self._update_information()
         

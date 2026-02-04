@@ -9,7 +9,8 @@ def filter_by_column(
     column: str,
     min_occurences: int = 0,
     min_value: Union[float, None] = None,
-    max_value: Union[float, None] = None
+    max_value: Union[float, None] = None,
+    max_occurences: int =  None
 ) -> Tuple[pd.DataFrame, dict]:
     """
     Filters indidvidual values in a track output file (loaded as pd.DataFrame) based on:
@@ -22,6 +23,8 @@ def filter_by_column(
         min_occurences (int, optional): Minimum number of occurrences to retain. Defaults to 0.
         min_value (float, optional): Minimum value threshold. Defaults to None.
         max_value (float, optional): Maximum value threshold. Defaults to None.
+        max_occurences (int, optional): Maximum number of occurrences to retain. Defaults to None.
+
 
     Returns:
         Tuple[pd.DataFrame, dict]: Filtered DataFrame and summary dictionary.
@@ -41,6 +44,11 @@ def filter_by_column(
         valid_ids = counts[counts >= min_occurences].index
         df = df[df[column].isin(valid_ids)]
 
+    # Filter by max occurrence count if set
+    if max_occurences is not None:
+        counts = df[column].value_counts()
+        valid_ids = counts[counts <= max_occurences].index
+        df = df[df[column].isin(valid_ids)]
     
     # Filter by value thresholds
     if min_value is not None:
@@ -59,6 +67,7 @@ def filter_by_column(
         "min_occurences": min_occurences,
         "min_value": min_value if min_value is not None else '',
         "max_value": max_value if max_value is not None else '',
+        "max_occurences": max_occurences if max_occurences is not None else '',
         "unique_values_before": unique_before,
         "unique_values_after": unique_after,
         "rows_before": total_rows_before,
