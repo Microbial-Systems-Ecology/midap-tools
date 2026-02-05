@@ -9,10 +9,8 @@ from IPython.display import display
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from collections import OrderedDict
-from typing import Union, List, Callable, Tuple, Optional
-from fluid_experiment.utilities import (
-                                      sort_folder_names,
-                                      )
+from typing import Union, List, Callable, Tuple
+from fluid_experiment.utilities import sort_folder_names, _call_custom_filter
 from analysis.growth_rate import calculate_growth_rate
 from analysis.local_neighborhood import compute_neighborhood_segmentation
 from analysis.global_metrics import compute_global_axes, collect_unique_column_values
@@ -515,13 +513,15 @@ class FluidExperiment:
                 print(f"Filtering channel {g} at position {p}:")
                 if custom_function is not None:
                     # apply the custom function with optional additional kwargs
-                    self.data[p][g], summary = custom_function(self.data[p][g], 
-                                                               column=column, 
-                                                               min_occurences=min_occurences, 
-                                                               min_value = min_value, 
-                                                               max_value = max_value, 
-                                                               max_occurence = max_occurence,
-                                                               **custom_kwargs)
+                    self.data[p][g], summary = _call_custom_filter(
+                        custom_function,
+                        self.data[p][g],
+                        column=column,
+                        min_occurences=min_occurences,
+                        min_value=min_value,
+                        max_value=max_value,
+                        max_occurence=max_occurence,
+                        **custom_kwargs)
                 else:
                     #Default function used by midap-tools
                     self.data[p][g], summary = filter_by_column(self.data[p][g], 

@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import cv2
 import re
+import inspect
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from scipy import stats
@@ -15,8 +16,6 @@ def sort_folder_names(folders):
         return int(match.group(1)) if match else float('inf')  # Push non-numbered names to end
 
     return sorted(folders, key=extract_number)
-
-      
 
 def smooth_values_within_id(df: pd.DataFrame, id_column: str = "trackID", value_col: str = "growth_rate", interval: int = 5) -> pd.DataFrame:
     """
@@ -107,8 +106,6 @@ def show_slice(arr3d, axis=0, index=0, cmap='gray'):
     plt.axis('off')
     plt.show()
     
-
-
 
 def run_stats_lmer(df, dependable_variable ,terms, interactions=None, group="trackID"):
     df = df.copy()
@@ -215,3 +212,10 @@ def plot_frame_cv2_jupyter_dict(array_dict, frame_index=0, colors=None, figsize=
     plt.legend(handles=legend_patches, loc='upper right')
     plt.show()
     
+def _call_custom_filter(func, df, **kwargs):
+    sig = inspect.signature(func)
+    accepted = {
+        k: v for k, v in kwargs.items()
+        if k in sig.parameters
+    }
+    return func(df, **accepted)

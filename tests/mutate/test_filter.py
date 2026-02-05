@@ -96,6 +96,24 @@ def test_id_filter_min_value_filter(sample_df):
     assert summary['rows_after'] == 4
     assert len(filtered) == 4
 
+def test_id_filter_min_value_filter_mode_keep(sample_df):
+    filtered, summary = filter_id_by_data_ranges(sample_df, column='score', min_value=30, mode = "keep")
+    expected_ids = [1,2,3]
+    assert set(filtered['trackID'].unique()) == set(expected_ids)
+    
+def test_id_filter_min_occurence_min_value_filter_mode_remove(sample_df):
+    filtered, summary = filter_id_by_data_ranges(sample_df, column='trackID', min_occurences=2, max_value=4, mode = "remove")
+    expected_ids = [1, 2]
+    assert set(filtered['trackID'].unique()) == set(expected_ids)
+
+    
+def test_id_filter_min_occurence_min_value_filter_mode_keep(sample_df):
+    filtered, summary = filter_id_by_data_ranges(sample_df, column='trackID', min_occurences=2, max_value=4, mode = "keep")
+    print(sample_df)
+    print(filtered)
+    expected_ids = [3, 4, 5, 6]
+    assert set(filtered['trackID'].unique()) == set(expected_ids)
+
 def test_id_filter_max_value_filter(sample_df):
     filtered, summary = filter_id_by_data_ranges(sample_df, column='score', max_value=25)
     expected_ids = [1,3]
@@ -123,8 +141,6 @@ def test_id_filter_combined_filters(sample_df):
     expected_ids = [2,5]
     assert set(filtered['trackID'].unique()) == set(expected_ids)
     assert summary['rows_after'] == 5
-    assert summary['filtered_ids_by_min_occurences'] == 3
-    assert summary['filtered_ids_by_value_range'] == 1
     assert len(filtered) == 5
 
 def test_id_filter_empty_input():

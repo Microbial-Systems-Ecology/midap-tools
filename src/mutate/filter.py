@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from skimage.measure import regionprops
-from typing import Union, Tuple
+from typing import Union, Tuple, Literal
 from multiprocessing import Pool, cpu_count
 
 def filter_by_column(
@@ -192,7 +192,9 @@ def filter_id_by_data_ranges(
     min_occurences: int = 0,
     min_value: Union[float, None] = None,
     max_value: Union[float, None] = None,
+    max_occurence: int = None,
     id_column: str = "trackID",
+    mode: Literal["remove", "keep"] = "remove",
 ) -> Tuple[pd.DataFrame, dict]:
     """
     Filters entire IDs (e.g., trackIDs) in a track output file (loaded as pd.DataFrame) based on:
@@ -207,6 +209,7 @@ def filter_id_by_data_ranges(
         min_value (float, optional): Minimum allowed value at all rows for an ID. Defaults to None (no filter).
         max_value (float, optional): Maximum allowed value at all rows for an ID. Defaults to None (no filter).
         id_column (str, optional): Column holding the identifier (e.g., "trackID"). Defaults to "trackID".
+        mode (literal): "remove" or "keep". "remove" will remove any value that falls outside of the range or value criterias, keep will return the inverse (return data that was filtered)
 
     Returns:
         Tuple[pd.DataFrame, dict]: Filtered DataFrame and summary dictionary.
@@ -218,24 +221,34 @@ def filter_id_by_data_ranges(
     total_rows_before = len(df)
     ids_before = df[id_column].nunique()
 
+    id_counts = df[id_column].value_counts()
+    all_ids = set(id_counts.index)
+
+    valid_ids = set(id_counts.index)
 
     if min_occurences > 0:
-        id_counts = df[id_column].value_counts()
-        ids_meeting_occ = set(id_counts[id_counts >= min_occurences].index)
-    else:
-        ids_meeting_occ = set(df[id_column].unique())
+        valid_ids &= set(id_counts[id_counts >= min_occurences].index)
+
+    if max_occurence is not None:
+        valid_ids &= set(id_counts[id_counts <= max_occurence].index)
 
     violating_ids = set()
+
     if min_value is not None:
-        violating_ids.update(df.loc[df[column] < min_value, id_column].unique())
+        violating_ids |= set(df.loc[df[column] < min_value, id_column].unique())
+
     if max_value is not None:
-        violating_ids.update(df.loc[df[column] > max_value, id_column].unique())
-    violating_ids = set(violating_ids)
+        violating_ids |= set(df.loc[df[column] > max_value, id_column].unique())
 
-    ids_removed_by_occ = set(df[id_column].unique()) - ids_meeting_occ
-    ids_removed_by_range = violating_ids - ids_removed_by_occ
+    valid_ids -= violating_ids
 
-    keep_ids = ids_meeting_occ - violating_ids
+    if mode == "remove":
+        keep_ids = valid_ids
+    elif mode == "keep":
+        keep_ids = all_ids - valid_ids
+    else:
+        raise ValueError(f"Invalid mode: {mode}")
+
     df = df[df[id_column].isin(keep_ids)]
 
     total_rows_after = len(df)
@@ -248,14 +261,13 @@ def filter_id_by_data_ranges(
         "id_column": id_column,
         "data_column_filtered": column,
         "min_occurences": min_occurences,
+        "max_occurence": max_occurence if max_occurence is not None else "",
         "min_value": min_value if min_value is not None else "",
         "max_value": max_value if max_value is not None else "",
         "unique_ids_before": ids_before,
         "unique_ids_after": ids_after,
         "rows_before": total_rows_before,
         "rows_after": total_rows_after,
-        "filtered_ids_by_min_occurences": len(ids_removed_by_occ),
-        "filtered_ids_by_value_range": len(ids_removed_by_range),
         "filter_rate_rows": rate_rows,
         "filter_rate_unique_ids": rate_ids,
     }
