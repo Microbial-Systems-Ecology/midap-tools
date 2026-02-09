@@ -9,7 +9,7 @@ from IPython.display import display
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from collections import OrderedDict
-from typing import Union, List, Callable, Tuple
+from typing import Union, List, Callable, Tuple, Literal
 from fluid_experiment.utilities import sort_folder_names, _call_custom_filter
 from analysis.growth_rate import calculate_growth_rate
 from analysis.local_neighborhood import compute_neighborhood_segmentation
@@ -127,7 +127,8 @@ class FluidExperiment:
                  path : str, 
                  color_channels: Union[str, List[str]] = None, 
                  positions: Union[str, List[str]] = None, 
-                 name: str = "experiment"):
+                 name: str = "experiment",
+                 data_type: Literal["family_machine","mother_machine"] = "family_machine"):
         """
         Initializes the data structure for fluid experiment data organized by position and color channel.
         This constructor scans a given directory path to identify experimental data, optionally filters by 
@@ -142,6 +143,7 @@ class FluidExperiment:
                 all subdirectories in `path` will be considered as positions. Defaults to None.
             name (str, optional): A name for the experiment. Used for identification or metadata purposes. 
                 Defaults to "experiment".
+            data_type (str): what type of data is loaded? supporte "family_machine" or "mother_machine". default is "family_machine"
         """
         self.path = path
         
@@ -166,6 +168,7 @@ class FluidExperiment:
         self.file_paths = {}
         self.metadata = None
         self.name = name
+        self.data_type = data_type
         for p in self.positions:
             self.data[p] = {}
             self.file_paths[p] = os.path.join(path,p)
@@ -173,7 +176,7 @@ class FluidExperiment:
             for g in self.color_channels:
                 print(f"Loading sample at position {p} for color channel {g}")
                 try:
-                    self.data[p][g] = load_tracking_data(os.path.join(path,p),g)
+                    self.data[p][g] = load_tracking_data(os.path.join(path,p),g, data_type)
                 except Exception as e:
                     raise RuntimeError(f"Could not load tracking data at position {p} and color channel {g}. Check if the folder contains valid data")
                 self.filter_history[p][g] = []

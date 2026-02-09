@@ -3,12 +3,21 @@ import os
 import glob
 import h5py
 import re
+from typing import Literal
 import numpy as np
 import pandas as pd
 from PIL import Image
 
-def load_tracking_data(path, group):
-    res_path = os.path.join(path,group, "track_output","*.csv")
+def load_tracking_data(path, group, data_type:Literal["family_machine","mother_machine"]):
+    
+    if data_type == "family_machine":
+        res_path = os.path.join(path,group, "track_output","*.csv")
+    elif data_type == "mother_machine":
+        print("Loading from mother machine. Multiple operations will not be supported (plot_frame / spatial maps, densities and more)")
+        res_path = os.path.join(path,group, "combined_lineages.csv")
+    else:
+        raise ValueError(f"unsupported data_type {data_type}")
+    
     res_path = glob.glob(res_path)
     if len(res_path) == 0:
         raise FileNotFoundError(f"Results data  (track_output/*.csv) for {group} at position path {path} does not exist!")
