@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
+from mutate.fuse import fuse_track_output
+
 def load_tracking_data(path, group, data_type:Literal["family_machine","mother_machine"]):
     
     if data_type == "family_machine":
@@ -23,6 +25,12 @@ def load_tracking_data(path, group, data_type:Literal["family_machine","mother_m
         raise FileNotFoundError(f"Results data  (track_output/*.csv) for {group} at position path {path} does not exist!")
     tracking_file = res_path[0]
     data = pd.read_csv(tracking_file)
+    
+    if data_type == "mother_machine":
+        data["trackID_chamber"] = data["trackID"]
+        df_list = [df.copy() for _, df in data.groupby("chamber")]
+        data = fuse_track_output(df_list)
+    
     return data
 
 def load_segmentations_h5(path, group, binary = True):
