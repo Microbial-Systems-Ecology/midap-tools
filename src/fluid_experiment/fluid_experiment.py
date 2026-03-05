@@ -16,7 +16,7 @@ from analysis.local_neighborhood import compute_neighborhood_segmentation
 from analysis.global_metrics import compute_global_axes, collect_unique_column_values
 from plotting.histogram import plot_histogram, plot_value_count_histogram
 from plotting.rate_plots import plot_growth_rate_with_ribbon, xy_slope_rate_plot
-from plotting.qc_plots import plot_qc_xy_correlation, plot_frame_cv2_jupyter_dict, plot_xy_correlation, plot_spatial_maps, plot_xy_correlation_stacked
+from plotting.qc_plots import plot_qc_xy_correlation, plot_frame_cv2_jupyter_dict, plot_xy_correlation, plot_spatial_maps, plot_xy_correlation_stacked, plot_spatial_maps_overlayed
 from plotting.result_plots import summary_plot
 from report.data_summary import data_summary
 from mutate.fuse import fuse_track_output
@@ -1657,6 +1657,91 @@ class FluidExperiment:
                 plt.close(fig)
             output_path = f"{outfile_prefix}_{p}.gif"
             imageio.mimsave(output_path, images, fps=fps)
+            
+    def render_spatial_maps_overlayed(self,
+                                    property_column: str,
+                                    color_map: dict,
+                                    outfile_prefix: str = "spatial_maps_overlayed",
+                                    positions: Union[str, List[str]] = None,
+                                    color_channels: Union[str, List[str]] = None,
+                                    value_ranges: dict = None,
+                                    fps: int = 2):
+        """
+        Creates a GIF animation for each position showing overlayed spatial maps across all frames,
+        with each color channel rendered in its own color gradient and composited together.
+
+        Args:
+            property_column (str): Data column to color by (must exist in tracking data).
+            color_map (dict): Mapping of channel name to base RGB color, e.g. {'GFP': (0,1,0), 'mCherry': (1,0,0)}.
+            outfile_prefix (str): Prefix for output GIF filenames.
+            positions (str or list): Positions to include. Defaults to all.
+            color_channels (str or list): Channels to include. Defaults to all.
+            value_ranges (dict): Optional dict mapping channel name to (min, max) tuple for fixed colorscale.
+                                If None, min/max are computed across all frames per channel.
+            fps (int): Playback speed of the gif in frames per second.
+        """
+        from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+
+        #Logic that determins data ranges
+        def _compute_value_ranges(seg: dict,
+                                df_dict: dict,
+                                property: str,
+                                color_channels: list) -> dict:
+            ranges = {}
+            for c in color_channels:
+                if c not in df_dict or c not in seg:
+                    continue
+                df = df_dict[c]
+                if property not in df.columns:
+                    continue
+                values = df[property].dropna()
+                if len(values) == 0:
+                    ranges[c] = (0.0, 1.0)
+                else:
+                    ranges[c] = (float(values.min()), float(values.max()))
+            return ranges
+
+        if color_channels is None:
+            color_channels = self.color_channels
+        if positions is None:
+            positions = self.positions
+        color_channels = self._save_select(color_channels)
+        positions = self._save_select(positions)
+
+        for p in positions:
+            print(f"Generating overlayed spatial map GIF for position: {p}")
+            seg = {c: load_tracking_h5(self.file_paths[p], c) for c in color_channels}
+            data = self.get_data([p], color_channels)
+
+            # Compute global value ranges across all frames if not provided
+            if value_ranges is None:
+                computed_ranges = _compute_value_ranges(seg, data[p], property_column, color_channels)
+            else:
+                computed_ranges = value_ranges
+
+            images = []
+            n_frames = min([v.shape[0] for k, v in seg.items()])
+            for f in range(n_frames):
+                fig = plot_spatial_maps_overlayed(
+                    seg,
+                    data[p],
+                    property=property_column,
+                    color_map=color_map,
+                    frame_number=f,
+                    value_ranges=computed_ranges,
+                    title=f"{p}: {property_column} at Frame {f}",
+                    show=False
+                )
+                canvas = FigureCanvas(fig)
+                canvas.draw()
+                image = np.frombuffer(canvas.buffer_rgba(), dtype='uint8')
+                image = image.reshape(canvas.get_width_height()[::-1] + (4,))[:, :, :3]
+                images.append(image)
+                plt.close(fig)
+
+            output_path = f"{outfile_prefix}_{p}.gif"
+            imageio.mimsave(output_path, images, fps=fps)
+            print(f"Saved: {output_path}")
  
     def report_file_paths(self):
         """ Prints the file paths of all positions in the experiment.

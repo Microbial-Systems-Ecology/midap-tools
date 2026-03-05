@@ -449,3 +449,158 @@ def plot_spatial_maps(array_dict: dict,
     else:
         return fig
 
+
+def plot_spatial_maps_overlayed(array_dict: dict,
+                                 df_dict: dict,
+                                 property: str,
+                                 color_map: dict,
+                                 frame_number: int = 0,
+                                 value_ranges: dict = None,
+                                 title: str = None,
+                                 silent: bool = True,
+                                 show: bool = True):
+    """
+    Plots overlayed spatial maps of a cell property, compositing multiple channels
+    each rendered with their own color gradient onto a single black background.
+    Per-channel gradient colorbars are stacked vertically on the right.
+
+    Parameters:
+        array_dict (dict of np.ndarray): Numpy ND array [t,y,x] with label image stacks, keyed by channel.
+        df_dict (dict of pd.DataFrame): Pandas DataFrames with tracking data, keyed by channel.
+        property (str): Key of cell property contained in the DataFrames.
+        color_map (dict): Mapping of channel name to base RGB color tuple, e.g. {'GFP': (0,1,0)}.
+                          Colors should be in [0,1] range.
+        frame_number (int, optional): Frame number to display. Defaults to 0.
+        value_ranges (dict, optional): Mapping of channel name to (min, max) tuple for fixed scaling.
+                                       If None, per-frame min/max is used (not recommended for GIFs).
+        title (str, optional): Title of the plot. Defaults to None.
+        silent (bool, optional): If True, suppresses warnings about missing cells. Defaults to True.
+        show (bool): If False, returns the figure object instead of displaying it.
+
+    Returns:
+        matplotlib.figure.Figure or None: Figure object if show=False, else None.
+    """
+    # Determine the image shape from the first available channel
+    shape = None
+    for c, label_stack in array_dict.items():
+        shape = label_stack[frame_number, :, :].shape
+        break
+    if shape is None:
+        raise ValueError("array_dict is empty; cannot determine image shape.")
+
+    active_channels = [c for c in df_dict.keys() if c in array_dict and c in color_map]
+    n_cbars = len(active_channels)
+
+    # Layout: image axes (left) + one narrow column of stacked colorbar axes (right)
+    # Each channel gets its own subplot row in the right column via GridSpecFromSubplotSpec
+    fig = plt.figure(figsize=(8.5, 6), facecolor='black')
+    outer_gs = fig.add_gridspec(
+        1, 2,
+        width_ratios=[1.0, 0.18],
+        wspace=0.08,
+        left=0.02, right=0.93,
+        top=0.92, bottom=0.05
+    )
+
+    ax_img = fig.add_subplot(outer_gs[0])
+
+    # Stack n_cbars colorbar axes vertically in the right column with small gaps
+    inner_gs = outer_gs[1].subgridspec(n_cbars, 1, hspace=0.6)
+    cbar_axes = [fig.add_subplot(inner_gs[j]) for j in range(n_cbars)]
+
+    # Composite RGB image
+    composite = np.zeros((*shape, 3), dtype=np.float64)
+    floor_intensity = 0.05
+    channel_data = {}
+
+    for c in active_channels:
+        label_stack = array_dict[c]
+        df = df_dict[c]
+        labels = label_stack[frame_number, :, :]
+        base_color = np.array(color_map[c], dtype=np.float64)
+
+        spatial_map = np.full(shape, np.nan)
+        for cnb in np.unique(labels):
+            if cnb == 0:
+                continue
+            try:
+                spatial_map[labels == cnb] = df.loc[
+                    (df['frame'] == frame_number) & (df['trackID'] == cnb), property
+                ].item()
+            except Exception:
+                if not silent:
+                    print(f"skipping cell {cnb} in frame {frame_number} for channel {c}")
+
+        if value_ranges is not None and c in value_ranges:
+            v_min, v_max = value_ranges[c]
+        else:
+            valid = spatial_map[~np.isnan(spatial_map)]
+            if len(valid) == 0:
+                channel_data[c] = {"base_color": base_color, "v_min": 0.0, "v_max": 1.0}
+                continue
+            v_min, v_max = float(valid.min()), float(valid.max())
+
+        denom = v_max - v_min if v_max != v_min else 1.0
+        norm_map = np.clip((spatial_map - v_min) / denom, 0.0, 1.0)
+        intensity = np.where(
+            np.isnan(spatial_map),
+            0.0,
+            floor_intensity + norm_map * (1.0 - floor_intensity)
+        )
+        composite += intensity[:, :, np.newaxis] * base_color[np.newaxis, np.newaxis, :]
+        channel_data[c] = {"base_color": base_color, "v_min": v_min, "v_max": v_max}
+
+    composite = np.clip(composite, 0.0, 1.0)
+
+    ax_img.imshow(composite)
+    ax_img.set_title(title or f'Overlayed Spatial Maps of {property} at Frame {frame_number}',
+                     color='white', fontsize=9)
+    ax_img.axis('off')
+    ax_img.set_facecolor('black')
+
+    # Draw each colorbar in its own stacked axes slot
+    gradient = np.linspace(0, 1, 256).reshape(256, 1)
+
+    for i, c in enumerate(active_channels):
+        ax_cb = cbar_axes[i]
+        info = channel_data.get(c)
+        if info is None:
+            ax_cb.axis('off')
+            continue
+
+        base_color = info["base_color"]
+        v_min = info["v_min"]
+        v_max = info["v_max"]
+
+        # Build gradient image: low at bottom, high at top
+        cbar_img = np.zeros((256, 1, 3), dtype=np.float64)
+        intensities = floor_intensity + gradient[:, 0] * (1.0 - floor_intensity)
+        cbar_img[:, 0, :] = intensities[:, np.newaxis] * base_color[np.newaxis, :]
+        cbar_img = np.clip(cbar_img, 0.0, 1.0)
+
+        ax_cb.imshow(cbar_img, aspect='auto', origin='lower',
+                     extent=[0, 1, v_min, v_max])
+        ax_cb.set_xlim(0, 1)
+        ax_cb.set_ylim(v_min, v_max)
+        ax_cb.set_xticks([])
+
+        # Ticks on the right side only, 3 ticks: min, mid, max
+        mid = (v_min + v_max) / 2.0
+        ax_cb.set_yticks([v_min, mid, v_max])
+        ax_cb.yaxis.tick_right()
+        ax_cb.yaxis.set_label_position('right')
+        ax_cb.tick_params(axis='y', labelsize=7, colors='white', length=3, pad=2)
+        ax_cb.yaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter('%.2g'))
+
+        # Channel name above each colorbar, in its own color
+        ax_cb.set_title(c, fontsize=8, color=base_color.tolist(), pad=3)
+
+        ax_cb.set_facecolor('black')
+        for spine in ax_cb.spines.values():
+            spine.set_edgecolor('gray')
+            spine.set_linewidth(0.5)
+
+    if show:
+        plt.show()
+    else:
+        return fig
