@@ -1537,7 +1537,8 @@ class FluidExperiment:
                                 outfile_prefix: str = "selected_frames", 
                                 show_distance: int = None,
                                 positions: Union[str, List[str]] = None, 
-                                color_channels: Union[str, List[str]] = None):
+                                color_channels: Union[str, List[str]] = None,
+                                fps: int = 2):
         """
         Creates a GIF animation for each position showing overlayed segmentation maps across all frames.
 
@@ -1546,6 +1547,7 @@ class FluidExperiment:
             show_distance (int): Radius of red circle to draw at center (in px), optional.
             positions (str or list): Positions to include. Defaults to all.
             color_channels (str or list): Color channels to include. Defaults to all.
+            fps (int): playback speed of the gif in frames per second
         """
         if color_channels is None:
             color_channels = self.color_channels
@@ -1568,7 +1570,7 @@ class FluidExperiment:
                 images.append(image)
                 plt.close(fig)
             output_path = f"{outfile_prefix}_{p}.gif"
-            imageio.mimsave(output_path, images, fps=2)
+            imageio.mimsave(output_path, images, fps=fps)
 
     def plot_spatial_maps(self,
                                        frame: int,
@@ -1613,7 +1615,8 @@ class FluidExperiment:
                                 property_column: str,
                                 outfile_prefix: str = "spatial_maps",
                                 positions: Union[str, List[str]] = None,
-                                color_channels: Union[str, List[str]] = None):
+                                color_channels: Union[str, List[str]] = None,
+                                fps = 2):
         """
         Creates a GIF animation for each position showing spatial maps (segmentation colored by attribute) across all frames.
 
@@ -1622,6 +1625,7 @@ class FluidExperiment:
             outfile_prefix (str): Prefix for output GIF filenames (e.g., 'spatial_maps_pos1.gif').
             positions (str or list): Positions to include. Defaults to all.
             color_channels (str or list): Channels to include. Defaults to all.
+            fps (int): playback speed of the gif in frames per second
         """
         from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
@@ -1652,7 +1656,7 @@ class FluidExperiment:
                 images.append(image)
                 plt.close(fig)
             output_path = f"{outfile_prefix}_{p}.gif"
-            imageio.mimsave(output_path, images, fps=2)
+            imageio.mimsave(output_path, images, fps=fps)
  
     def report_file_paths(self):
         """ Prints the file paths of all positions in the experiment.
