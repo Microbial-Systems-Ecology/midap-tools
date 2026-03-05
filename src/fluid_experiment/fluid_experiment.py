@@ -52,6 +52,8 @@ class FluidExperiment:
         load(file_path): Loads a `FluidExperiment` object from an HDF5 file (previous save).
         save(file_path): Saves the `FluidExperiment` object to an HDF5 file.
         filter_data(column, ...): Filters data based on specified criteria (min occurence, min / max values etc).
+        filter_segment_shape(...): Filters by the shape of a cells segment map segment (i.e its smoothness)
+        clear_filter_history(): clears the current filter history for all positions / color channels
         drop_positions(positions): Removes specified positions from the experiment.
         drop_color_channels(color_channels): Removes specified color channels from the experiment.
         drop_data_column(data_columns): Removes specified data columns from all dataframes in the experiment.
@@ -77,6 +79,7 @@ class FluidExperiment:
         plot_spatial_maps(...): Plots spatial maps (cells colored by a selected attribute (i.e growth rate)) at a selected frame
         render_frame_gif(...): Creates a GIF animation for each position showing overlayed segmentation maps across all frames.
         render_spatial_maps_gif(...): Creates a GIF animation for each position showing spatial maps (segmentation colored by attribute) across all frames.
+        render_spatial_maps_gif_overlayed(...): Creates a GIF animation for each position showing spatial maps of selected color channels (overlayed on same plot). each channel gets its own color gradient (from dark to bright)
         report_filter_history(): Prints the filter history (with sequence of filters applied / filter rate etc) for each positions and color channel.
         report_file_paths(): Prints the file paths for each position in the experiment.
         get_data(positions, color_channels): Retrieves data for specified positions and color channels.
@@ -562,6 +565,14 @@ class FluidExperiment:
                 self.data[p][c], summary = filter_by_segment_shape_parallel(self.data[p][c], mask, smoothness)
                 self.filter_history[p][c].append(summary)    
         
+    def clear_filter_history(self):
+        """
+        Clears the current filter history
+        """
+        for p in self.positions:
+            for c in self.color_channels:
+                self.filter_history[p][c] = []
+    
     def drop_positions(self, positions: Union[str,List[str]]):
         """
         Removes specified positions from the experiment.
@@ -1012,7 +1023,6 @@ class FluidExperiment:
                                                             poly_degree= 2)
         self._update_information()
                 
-    
         
 # ==========================================================    
 # ==================== CALCULATION METHODS =================
