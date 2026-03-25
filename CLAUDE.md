@@ -108,6 +108,9 @@ experiment.filter_history            # dict tracking all filters applied
 
 ## Conventions to Follow
 
+### Updating NEWS.md
+Every new feature or method must be logged at the **top** of `NEWS.md` under the current dev version heading (e.g. `## v1.3.0.9000 (dev)`). Add a bullet point with the method name in backticks followed by a short description. The version number follows the pattern `<release>.9000` for dev builds — the user updates the version header manually on release.
+
 ### Updating the class docstring
 Every new `FluidExperiment` method must be added to the `Methods:` section of the class docstring in `fluid_experiment.py`, in the same logical group as related methods (loading, filtering, calculation, plotting, reporting). Use the same one-line summary style as existing entries.
 
