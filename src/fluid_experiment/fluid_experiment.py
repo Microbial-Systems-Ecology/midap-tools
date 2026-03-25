@@ -25,6 +25,7 @@ from mutate.filter import filter_by_column, filter_by_segment_shape_parallel
 from mutate.load import load_tracking_data, load_segmentations_h5, load_tracking_h5, save_segmentations_h5, save_tracking_data, load_cut_im_stack
 from mutate.combine_channels import multichannel_set_operations, get_intensity_from_bitmap
 from mutate.offset import apply_frame_offset as _apply_frame_offset
+from mutate.align import cut_to_frame_range as _cut_to_frame_range
 from mutate.smooth import smooth_svagol
 
 class FluidExperiment:
@@ -68,7 +69,8 @@ class FluidExperiment:
         fix_base_path(...): Updates the file paths of the specified positions to a new base path.
         add_bin_data(...): Adds descriptions of bins to each sample to the experiment data (based on selected frames or frame ranges).
         add_bin_data_from_data(...): Adds bin data to the experiment data based on value ranges of other data columns (i.e area).
-        apply_offset_correction(offsets, by_group, frame_column): Shifts frame indices forward for selected positions, either by position name or by metadata group.
+        apply_offset_correction(offsets, by_group, frame_column, out_column): Shifts frame values forward for selected positions (by name or metadata group), writing results to a new column by default to preserve bitmap-indexed "frame".
+        align_frames(frame_column, out_column): Aligns all positions to their shared frame range, writing reindexed values to a new column by default to preserve bitmap-indexed "frame".
         calculate_growth_rate(...): Calculates growth rates for the experiment data.
         calculate_local_neighborhood(...): Calculates local neighborhood densities for the data.
         calculate_transform_data(...): Adds transformed versions of specified columns to the data.
@@ -896,13 +898,14 @@ class FluidExperiment:
     def apply_offset_correction(self,
                                 offsets: dict,
                                 by_group: str = None,
-                                frame_column: str = "frame"):
+                                frame_column: str = "frame",
+                                out_column: str = "frame_offset"):
         """
-        Shifts frame indices forward for selected positions.
+        Shifts frame values forward for selected positions and writes results to out_column.
 
-        Offset is always additive (pushes frame indices forward): a position with
-        frames 0–5 and offset 2 becomes frames 2–7. The columns frame, first_frame,
-        and last_frame are shifted; the split column (a boolean flag) is left unchanged.
+        By default a new column "frame_offset" is added, preserving the original "frame"
+        column so bitmap/HDF5 indexing remains valid. Set out_column="frame" to overwrite
+        in place (also shifts first_frame and last_frame in that case).
 
         Positions can be selected in two ways:
 
@@ -920,7 +923,8 @@ class FluidExperiment:
             by_group (str, optional): metadata column name to look up group membership.
                                       If None, offsets keys are treated as position names.
                                       Defaults to None.
-            frame_column (str): name of the primary frame column. Defaults to "frame".
+            frame_column (str): column to read frame values from. Defaults to "frame".
+            out_column (str): column to write shifted values to. Defaults to "frame_offset".
 
         Returns:
             None: updates data in place.
@@ -939,10 +943,64 @@ class FluidExperiment:
                 raise ValueError(f"Positions not found in experiment: {invalid}")
             pos_offsets = offsets
 
-        for p, offset in pos_offsets.items():
-            print(f"Applying frame offset {offset} to position {p}")
+        for p in self.positions:
+            offset = pos_offsets.get(p, 0)
+            if offset != 0:
+                print(f"Applying frame offset {offset} to position {p} -> '{out_column}'")
             for c in self.color_channels:
-                self.data[p][c] = _apply_frame_offset(self.data[p][c], offset, frame_column)
+                self.data[p][c] = _apply_frame_offset(self.data[p][c], offset, frame_column, out_column)
+        self._update_information()
+
+    def align_frames(self,
+                     frame_column: str = "frame",
+                     out_column: str = "frame_aligned"):
+        """
+        Aligns all positions to their shared frame range and writes reindexed values to out_column.
+
+        The shared range is the intersection across all positions and channels:
+        start = max of each position's minimum frame, end = min of each position's maximum frame.
+
+        By default a new column "frame_aligned" is added, preserving the original "frame"
+        column so bitmap/HDF5 indexing remains valid. Rows outside the shared range receive
+        NaN in the new column and are kept in the DataFrame.
+
+        Set out_column="frame" to overwrite in place; in that mode rows outside the shared
+        range are dropped and first_frame / last_frame are shifted and clamped.
+
+        Example: pos1 has frames 0–5, pos2 has frames 3–7 → shared range is 3–5,
+        written as 0–2 in out_column.
+
+        Args:
+            frame_column (str): column to read frame values from. Defaults to "frame".
+            out_column (str): column to write aligned values to. Defaults to "frame_aligned".
+
+        Returns:
+            None: updates data in place.
+
+        Raises:
+            ValueError: if no overlapping frame range exists across positions.
+        """
+        start = int(max(
+            self.data[p][c][frame_column].min()
+            for p in self.positions
+            for c in self.color_channels
+        ))
+        end = int(min(
+            self.data[p][c][frame_column].max()
+            for p in self.positions
+            for c in self.color_channels
+        ))
+
+        if start > end:
+            raise ValueError(
+                f"No common frame range exists across positions. "
+                f"Latest start ({start}) exceeds earliest end ({end})."
+            )
+
+        print(f"Aligning all positions to shared frame range [{start}, {end}], written as [0, {end - start}] in '{out_column}'")
+        for p in self.positions:
+            for c in self.color_channels:
+                self.data[p][c] = _cut_to_frame_range(self.data[p][c], start, end, frame_column, out_column)
         self._update_information()
 
     def combine_channels(self,
