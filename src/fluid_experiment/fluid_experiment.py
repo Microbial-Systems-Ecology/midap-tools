@@ -24,6 +24,7 @@ from mutate.fuse import fuse_track_output
 from mutate.filter import filter_by_column, filter_by_segment_shape_parallel
 from mutate.load import load_tracking_data, load_segmentations_h5, load_tracking_h5, save_segmentations_h5, save_tracking_data, load_cut_im_stack
 from mutate.combine_channels import multichannel_set_operations, get_intensity_from_bitmap
+from mutate.offset import apply_frame_offset as _apply_frame_offset
 from mutate.smooth import smooth_svagol
 
 class FluidExperiment:
@@ -67,6 +68,7 @@ class FluidExperiment:
         fix_base_path(...): Updates the file paths of the specified positions to a new base path.
         add_bin_data(...): Adds descriptions of bins to each sample to the experiment data (based on selected frames or frame ranges).
         add_bin_data_from_data(...): Adds bin data to the experiment data based on value ranges of other data columns (i.e area).
+        apply_offset_correction(offsets, by_group, frame_column): Shifts frame indices forward for selected positions, either by position name or by metadata group.
         calculate_growth_rate(...): Calculates growth rates for the experiment data.
         calculate_local_neighborhood(...): Calculates local neighborhood densities for the data.
         calculate_transform_data(...): Adds transformed versions of specified columns to the data.
@@ -891,6 +893,58 @@ class FluidExperiment:
                     self.data[p][c].loc[(self.data[p][c][data_column] >= lower) & (self.data[p][c][data_column] < upper), bin_column_name] = bin_name
         self._update_information()
     
+    def apply_offset_correction(self,
+                                offsets: dict,
+                                by_group: str = None,
+                                frame_column: str = "frame"):
+        """
+        Shifts frame indices forward for selected positions.
+
+        Offset is always additive (pushes frame indices forward): a position with
+        frames 0–5 and offset 2 becomes frames 2–7. The columns frame, first_frame,
+        and last_frame are shifted; the split column (a boolean flag) is left unchanged.
+
+        Positions can be selected in two ways:
+
+        - Direct dict: offsets = {"pos1": 2, "pos3": 5}
+          Only positions listed in the dict are shifted; others are untouched.
+
+        - By metadata group: offsets = {"Cond1": 5, "Cond2": 3}, by_group = "group"
+          Looks up each position's value in the specified metadata column and applies
+          the corresponding offset. Positions whose group is not in offsets are untouched.
+          Requires metadata to be loaded.
+
+        Args:
+            offsets (dict): mapping of position -> offset (direct mode) or
+                            group_value -> offset (by_group mode). Offset values must be >= 0.
+            by_group (str, optional): metadata column name to look up group membership.
+                                      If None, offsets keys are treated as position names.
+                                      Defaults to None.
+            frame_column (str): name of the primary frame column. Defaults to "frame".
+
+        Returns:
+            None: updates data in place.
+        """
+        if by_group is not None:
+            if self.metadata is None:
+                raise ValueError("Metadata must be loaded before using by_group offset correction.")
+            pos_offsets = {}
+            for p in self.positions:
+                group_val = self.metadata.loc[p, by_group]
+                if group_val in offsets:
+                    pos_offsets[p] = offsets[group_val]
+        else:
+            invalid = set(offsets) - set(self.positions)
+            if invalid:
+                raise ValueError(f"Positions not found in experiment: {invalid}")
+            pos_offsets = offsets
+
+        for p, offset in pos_offsets.items():
+            print(f"Applying frame offset {offset} to position {p}")
+            for c in self.color_channels:
+                self.data[p][c] = _apply_frame_offset(self.data[p][c], offset, frame_column)
+        self._update_information()
+
     def combine_channels(self,
                          new_channel: str, 
                          used_channels: List[str],

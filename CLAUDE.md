@@ -68,7 +68,7 @@ experiment.filter_history            # dict tracking all filters applied
 | `lineageID` | Lineage group identifier (shared across a cell family) |
 | `trackID_d1` | trackID of first daughter cell after division |
 | `trackID_d2` | trackID of second daughter cell after division |
-| `split` | Frame index at which this cell divides (0 if no split) |
+| `split` | Boolean flag: 1 if the cell divides at this frame, 0 otherwise (not a frame index) |
 | `trackID_mother` | trackID of the mother cell this track originated from |
 | `first_frame` | First frame in which this trackID appears |
 | `last_frame` | Last frame in which this trackID appears |
