@@ -12,6 +12,7 @@ from collections import OrderedDict
 from typing import Union, List, Callable, Tuple, Literal
 from fluid_experiment.utilities import sort_folder_names, _call_custom_filter
 from analysis.growth_rate import calculate_growth_rate
+from analysis.lineage import create_new_lineage as _create_new_lineage
 from analysis.local_neighborhood import compute_neighborhood_segmentation
 from analysis.global_metrics import compute_global_axes, collect_unique_column_values
 from plotting.histogram import plot_histogram, plot_value_count_histogram
@@ -69,6 +70,7 @@ class FluidExperiment:
         calculate_growth_rate(...): Calculates growth rates for the experiment data.
         calculate_local_neighborhood(...): Calculates local neighborhood densities for the data.
         calculate_transform_data(...): Adds transformed versions of specified columns to the data.
+        create_new_lineage(start_frame, output_column, orphans_as_root): Rebuilds cell lineage from a given frame, storing roots and descendants in a new column (lineageID_postfix).
         plot_qc_histograms(...): Plots QC histograms for selected samples / groups.
         plot_qc(...): Plots QC scatter plots for selected samples and shows linear fit / R^2 (data vs frame within trackID).
         plot_xy_correlation(...): Plots XY correlation for selected columns within samples / groups.
@@ -1153,6 +1155,38 @@ class FluidExperiment:
                         case "inverse":
                             self.data[p][c][column + postfix] = np.reciprocal(self.data[p][c][column])
         self._update_information()            
+
+    def create_new_lineage(self,
+                           start_frame: int,
+                           output_column: str = "lineageID_postfix",
+                           orphans_as_root: bool = True):
+        """
+        Rebuilds cell lineage starting from a given frame and stores it in a new column.
+
+        Cells present at start_frame become the roots of new lineages. All descendants
+        (daughters, granddaughters, ...) inherit the root's trackID as their lineageID_postfix.
+        Rows at frames before start_frame receive NA.
+
+        TrackIDs that appear at or after start_frame but have no traceable path back to a cell
+        at start_frame (e.g. cells entering the field of view, broken tracks) are treated
+        according to orphans_as_root:
+            - True (default): they become their own lineage root (lineageID_postfix = trackID)
+            - False: they receive NA, same as pre-start_frame rows
+
+        Args:
+            start_frame (int): frame index from which to rebuild lineages (0-based)
+            output_column (str): name of the new lineage column. Defaults to "lineageID_postfix"
+            orphans_as_root (bool): if True, unresolved trackIDs at frame >= start_frame are
+                                    self-rooted. Defaults to True.
+
+        Returns:
+            None: updates data in place with the new column added to all positions and color channels
+        """
+        print(f"Building new lineage from frame {start_frame}, stored in column '{output_column}'")
+        for p in self.positions:
+            for c in self.color_channels:
+                self.data[p][c] = _create_new_lineage(self.data[p][c], start_frame, output_column, orphans_as_root)
+        self._update_information()
 
     def calculate_dataframe_operation(self,custom_function: Callable, **custom_kwargs):
         """
