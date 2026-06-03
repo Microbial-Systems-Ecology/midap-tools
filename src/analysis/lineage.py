@@ -64,7 +64,7 @@ def create_new_lineage(df: pd.DataFrame,
 
     # Apply: NA before start_frame, mapped root at/after start_frame
     df = df.copy()
-    df[output_column] = np.nan
+    df[output_column] = pd.NA
     mask_post = df["frame"] >= start_frame
     df.loc[mask_post, output_column] = df.loc[mask_post, "trackID"].map(trackid_to_root)
 
@@ -73,4 +73,5 @@ def create_new_lineage(df: pd.DataFrame,
         mask_orphan = mask_post & df[output_column].isna()
         df.loc[mask_orphan, output_column] = df.loc[mask_orphan, "trackID"]
 
+    df[output_column] = df[output_column].astype("Int64")
     return df
