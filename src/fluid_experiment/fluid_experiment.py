@@ -15,8 +15,15 @@ from analysis.growth_rate import calculate_growth_rate
 from analysis.lineage import create_new_lineage as _create_new_lineage
 from analysis.local_neighborhood import compute_neighborhood_segmentation
 from analysis.global_metrics import compute_global_axes, collect_unique_column_values
+from analysis.grouped_analyses import grouped_rank as _grouped_rank, grouped_metric as _grouped_metric
+from analysis.life_cycle import (
+    compute_life_cycle as _compute_life_cycle,
+    compute_time_to_split as _compute_time_to_split,
+    compute_lag_time as _compute_lag_time,
+)
 from plotting.histogram import plot_histogram, plot_value_count_histogram
 from plotting.rate_plots import plot_growth_rate_with_ribbon, xy_slope_rate_plot
+from plotting.time_to_split_plots import plot_division_time_boxplot, plot_division_time_curves, plot_division_time_heatmap
 from plotting.qc_plots import plot_qc_xy_correlation, plot_frame_cv2_jupyter_dict, plot_xy_correlation, plot_spatial_maps, plot_xy_correlation_stacked, plot_spatial_maps_overlayed
 from plotting.result_plots import summary_plot
 from report.data_summary import data_summary
@@ -75,12 +82,17 @@ class FluidExperiment:
         calculate_local_neighborhood(...): Calculates local neighborhood densities for the data.
         calculate_transform_data(...): Adds transformed versions of specified columns to the data.
         create_new_lineage(start_frame, output_column, orphans_as_root): Rebuilds cell lineage from a given frame, storing roots and descendants in a new column (lineageID_postfix).
+        calculate_grouped_rank(...): Ranks rows within each group based on a value column.
+        calculate_grouped_metric(...): Computes a group summary metric and broadcasts it as a new column.
+        calculate_time_to_split(...): Adds life_cycle and time_to_split columns derived from track durations.
+        calculate_lag_time(...): Adds a lag_time column measuring deviation from the per-lineage baseline cycle duration.
         plot_qc_histograms(...): Plots QC histograms for selected samples / groups.
         plot_qc(...): Plots QC scatter plots for selected samples and shows linear fit / R^2 (data vs frame within trackID).
         plot_xy_correlation(...): Plots XY correlation for selected columns within samples / groups.
         plot_xy_correlation_over_time(...): Plots XY correlations over time (gif + plot) for selected columns within samples / groups.
         plot_life_cycle_histograms(...): Plots histograms for life cycle data (histogram of trackID existence length).
         plot_rates(...): Plots rates (i.e growth rate) over time for the experiment.
+        plot_time_to_split(...): Plots division time distributions (boxplot, division time curves, heatmap) across snapshot times and groups.
         plot_selected_frame(...): Plots a selected frame from the experiment data (segmentation maps with color by channel).
         plot_spatial_maps(...): Plots spatial maps (cells colored by a selected attribute (i.e growth rate)) at a selected frame
         render_frame_gif(...): Creates a GIF animation for each position showing overlayed segmentation maps across all frames.
@@ -1316,7 +1328,168 @@ class FluidExperiment:
                 self.data[p][c] = custom_function(self.data[p][c], **custom_kwargs)
         self._update_information()
 
-# ==========================================================    
+    def calculate_grouped_rank(self,
+                               group_columns: Union[str, List[str]],
+                               value_column: str,
+                               rank_column: str = "rank",
+                               ascending: bool = False):
+        """
+        Ranks rows within each group based on a value column for all positions and color channels.
+
+        Args:
+            group_columns (str or list[str]): columns that define the groups (e.g. ["frame", "chamber"])
+            value_column (str): column to rank within each group
+            rank_column (str): name of the output rank column. Defaults to "rank"
+            ascending (bool): if False, rank 1 = highest value; if True, rank 1 = lowest value.
+                Defaults to False.
+        """
+        print(f"Calculating '{rank_column}' by ranking '{value_column}' within groups {group_columns}")
+        for p in self.positions:
+            for c in self.color_channels:
+                self.data[p][c] = _grouped_rank(
+                    self.data[p][c],
+                    group_columns=group_columns,
+                    value_column=value_column,
+                    rank_column=rank_column,
+                    ascending=ascending,
+                )
+        self._update_information()
+
+    def calculate_grouped_metric(self,
+                                 group_columns: Union[str, List[str]],
+                                 value_column: str,
+                                 mode: str = "mean",
+                                 metric_column: str = None):
+        """
+        Computes a group summary metric and broadcasts it as a new column for all positions and color channels.
+
+        Args:
+            group_columns (str or list[str]): columns that define the groups (e.g. ["frame", "chamber"])
+            value_column (str): column to aggregate
+            mode (str): aggregation type — one of "min", "max", "mean", "median", "sd".
+                Defaults to "mean"
+            metric_column (str, optional): name of the output column.
+                Defaults to f"{value_column}_{mode}"
+        """
+        if metric_column is None:
+            metric_column = f"{value_column}_{mode}"
+        print(f"Calculating '{metric_column}' as {mode} of '{value_column}' within groups {group_columns}")
+        for p in self.positions:
+            for c in self.color_channels:
+                self.data[p][c] = _grouped_metric(
+                    self.data[p][c],
+                    group_columns=group_columns,
+                    value_column=value_column,
+                    mode=mode,
+                    metric_column=metric_column,
+                )
+        self._update_information()
+
+    def calculate_time_to_split(self,
+                                frame_column: str = "frame",
+                                id_column: str = "trackID",
+                                life_cycle_column: str = "life_cycle",
+                                time_to_split_column: str = "time_to_split"):
+        """
+        Adds life_cycle and time_to_split columns to all positions and color channels.
+
+        life_cycle: total duration of a track in frame_column units (max − min per id_column),
+            broadcast to every row of that track.
+
+        time_to_split: remaining time until the track ends from each row's perspective
+            (max frame_column for id − current frame_column value). At any snapshot time t,
+            filtering to rows where frame_column == t gives the time-to-split distribution
+            for all tracks alive at t, enabling survival and duration analyses.
+
+        Both columns work with integer and float frame columns (e.g. "frame" or "time_hour").
+
+        Args:
+            frame_column (str): numeric time column (int or float). Defaults to "frame"
+            id_column (str): column identifying individual tracks. Defaults to "trackID"
+            life_cycle_column (str): name of the life cycle output column. Defaults to "life_cycle"
+            time_to_split_column (str): name of the time-to-split output column.
+                Defaults to "time_to_split"
+        """
+        print(
+            f"Calculating '{life_cycle_column}' and '{time_to_split_column}' "
+            f"for '{id_column}' using '{frame_column}'"
+        )
+        for p in self.positions:
+            for c in self.color_channels:
+                self.data[p][c] = _compute_life_cycle(
+                    self.data[p][c],
+                    id_column=id_column,
+                    frame_column=frame_column,
+                    life_cycle_column=life_cycle_column,
+                )
+                self.data[p][c] = _compute_time_to_split(
+                    self.data[p][c],
+                    id_column=id_column,
+                    frame_column=frame_column,
+                    time_to_split_column=time_to_split_column,
+                )
+        self._update_information()
+
+    def calculate_lag_time(
+        self,
+        boundary_time: float,
+        frame_column: str = "frame",
+        id_column: str = "trackID",
+        lineage_column: str = "lineageID",
+        lag_time_column: str = "lag_time",
+        agg: str = "mean",
+        allow_negative: bool = True,
+        positions: Union[str, List[str]] = None,
+        color_channels: Union[str, List[str]] = None,
+    ) -> None:
+        """
+        Adds a lag_time column to all (or selected) positions and color channels.
+
+        For each track, lag_time is the difference between its actual cycle duration and
+        the per-lineage reference cycle duration computed from baseline tracks — those
+        whose last observed frame is strictly before boundary_time.
+
+        Baseline tracks will scatter around 0 (mean exactly 0 when agg="mean").
+        Tracks in lineages with no baseline data receive NaN.
+
+        Args:
+            boundary_time (float): frame value separating baseline from posterior.
+                Tracks last seen before this value form the per-lineage reference.
+            frame_column (str): numeric time column. Defaults to "frame"
+            id_column (str): column identifying individual tracks. Defaults to "trackID"
+            lineage_column (str): lineage group column. Defaults to "lineageID"
+            lag_time_column (str): name of the output column. Defaults to "lag_time"
+            agg (str): "mean" or "median" for the per-lineage reference. Defaults to "mean"
+            allow_negative (bool): if False, lag values below 0 are clipped to 0.
+                Defaults to True
+            positions (str or list[str], optional): positions to process. Defaults to all.
+            color_channels (str or list[str], optional): channels to process. Defaults to all.
+        """
+        if positions is None:
+            positions = self.positions
+        if color_channels is None:
+            color_channels = self.color_channels
+        positions = self._save_select(positions)
+        color_channels = self._save_select(color_channels)
+        print(
+            f"Calculating '{lag_time_column}' with boundary_time={boundary_time} "
+            f"(agg='{agg}', allow_negative={allow_negative})"
+        )
+        for p in positions:
+            for c in color_channels:
+                self.data[p][c] = _compute_lag_time(
+                    self.data[p][c],
+                    boundary_time=boundary_time,
+                    frame_column=frame_column,
+                    id_column=id_column,
+                    lineage_column=lineage_column,
+                    lag_time_column=lag_time_column,
+                    agg=agg,
+                    allow_negative=allow_negative,
+                )
+        self._update_information()
+
+# ==========================================================
 # ==================== PLOTTING / REPORTING METHODS ========
 # ==========================================================                
         
@@ -1648,11 +1821,104 @@ class FluidExperiment:
             if flip_grouping:
                 pdat = self._flip_dict(pdat)
             for k, v in pdat.items():
-                plot_growth_rate_with_ribbon(v, 
-                                             rate_column, 
+                plot_growth_rate_with_ribbon(v,
+                                             rate_column,
                                              frame_column,
                                              title = f"{title} for position data {k}")
-        
+
+    def plot_time_to_split(self,
+                           time_to_split_column: str = "time_to_split",
+                           frame_column: str = "frame",
+                           group_by: str = None,
+                           flip_grouping: bool = False,
+                           start_times: List = None,
+                           n_bins: int = None,
+                           max_time: float = None,
+                           plot_types: List[str] = None,
+                           positions: Union[str, List[str]] = None,
+                           color_channels: Union[str, List[str]] = None):
+        """
+        Plots time-to-split distributions across snapshot times and groups.
+
+        Generates any combination of: boxplot (duration distributions), division time curves
+        (fraction not yet divided over time), and division time heatmap (2-D view across
+        all start times). Use plot_types to select which charts to produce.
+
+        start_times defines the experiment time-points at which the time_to_split column
+        is sampled. If not provided, n_bins evenly-spaced times across the frame range are
+        used (default: 10 bins).
+
+        Args:
+            time_to_split_column (str): column with time-to-split values. Defaults to "time_to_split"
+            frame_column (str): column used to slice snapshot rows. Defaults to "frame"
+            group_by (str, optional): metadata column to aggregate by. If None, plots per position.
+            flip_grouping (bool): if True, swap outer/inner grouping keys. Defaults to False
+            start_times (list, optional): explicit snapshot times. Mutually exclusive with n_bins.
+            n_bins (int, optional): number of evenly-spaced snapshot times. Defaults to 10 if
+                neither start_times nor n_bins is provided.
+            max_time (float, optional): upper bound of valid frame values for the heatmap. Start
+                times beyond this value are rendered as white. If None, derived from the data.
+            plot_types (list[str], optional): charts to generate — any subset of
+                ["boxplot", "division_curves", "division_heatmap"]. Defaults to ["boxplot", "division_curves"].
+            positions (str or list[str], optional): positions to include. Defaults to all.
+            color_channels (str or list[str], optional): color channels to include. Defaults to all.
+        """
+        if positions is not None and group_by is not None:
+            print("cannot select both groups and positions — ignoring positions for plot")
+        if positions is None:
+            positions = self.positions
+        if color_channels is None:
+            color_channels = self.color_channels
+        if plot_types is None:
+            plot_types = ["boxplot", "division_curves"]
+
+        frame_vals = pd.concat(
+            [self.data[p][c][frame_column] for p in self.positions for c in self.color_channels],
+            ignore_index=True,
+        )
+        if start_times is None:
+            if n_bins is None:
+                n_bins = 10
+            start_times = list(np.linspace(float(frame_vals.min()), float(frame_vals.max()), n_bins))
+
+        effective_max_time = max_time if max_time is not None else float(frame_vals.max())
+
+        if group_by is not None:
+            pdat = self.get_aggregate_data(group_by, color_channels)
+        else:
+            pdat = self.get_data(positions, color_channels)
+
+        if flip_grouping:
+            pdat = self._flip_dict(pdat)
+
+        for outer_key, inner_dict in pdat.items():
+            tag = str(outer_key)
+            if "boxplot" in plot_types:
+                plot_division_time_boxplot(
+                    inner_dict,
+                    time_to_split_column=time_to_split_column,
+                    start_times=start_times,
+                    frame_column=frame_column,
+                    title=f"Duration Until Next Division — {tag}",
+                )
+            if "division_curves" in plot_types:
+                plot_division_time_curves(
+                    inner_dict,
+                    time_to_split_column=time_to_split_column,
+                    start_times=start_times,
+                    frame_column=frame_column,
+                    title=f"Division Time Curves — {tag}",
+                )
+            if "division_heatmap" in plot_types:
+                plot_division_time_heatmap(
+                    inner_dict,
+                    time_to_split_column=time_to_split_column,
+                    start_times=start_times,
+                    frame_column=frame_column,
+                    title=f"Division Time Heatmap — {tag}",
+                    max_time=effective_max_time,
+                )
+
     def plot_selected_frame(self, 
                              frame: int, 
                              positions: Union[str, List[str]] = None, 
